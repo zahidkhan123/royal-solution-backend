@@ -37,14 +37,28 @@ export const getUserDashboard = async (
       }),
       Job.countDocuments({ owner: userId, status: "pending" }),
       Job.countDocuments({ owner: userId, status: "completed" }),
-      Invoice.find({
-        billToUser: userId,
-        status: { $ne: "draft" },
-      })
-        .sort({ createdAt: -1 })
-        .limit(5)
-        .populate("client", "name")
-        .lean(),
+      (async () => {
+        const ownedProps = await Property.find({
+          owner: userId,
+          isActive: true,
+        })
+          .select("_id")
+          .lean();
+        const propertyIds = ownedProps.map((p) => p._id);
+        return Invoice.find({
+          $or: [
+            { billToUser: userId },
+            ...(propertyIds.length
+              ? [{ property: { $in: propertyIds } }]
+              : []),
+          ],
+          status: { $ne: "draft" },
+        })
+          .sort({ createdAt: -1 })
+          .limit(5)
+          .populate("client", "name")
+          .lean();
+      })(),
       AppNotification.countDocuments({ user: userId, isRead: false }),
       Property.countDocuments({ owner: userId, isActive: true }),
       Job.find({ owner: userId })

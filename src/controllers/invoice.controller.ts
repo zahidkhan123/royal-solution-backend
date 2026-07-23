@@ -6,6 +6,7 @@ import Invoice, {
 } from "../models/Invoice.model.js";
 import Client from "../models/Client.model.js";
 import Job from "../models/Job.model.js";
+import Property from "../models/Property.model.js";
 import CompanySettings, {
   toCompanySnapshot,
 } from "../models/CompanySettings.model.js";
@@ -88,7 +89,18 @@ export const listInvoices = async (
 
     const filter: Record<string, unknown> = {};
     if (!isStaffRole(user.role)) {
-      filter.billToUser = user._id;
+      // Property owners: invoices billed to them OR linked to their properties
+      const ownedProps = await Property.find({
+        owner: user._id,
+        isActive: true,
+      })
+        .select("_id")
+        .lean();
+      const propertyIds = ownedProps.map((p) => p._id);
+      filter.$or = [
+        { billToUser: user._id },
+        ...(propertyIds.length ? [{ property: { $in: propertyIds } }] : []),
+      ];
       // Users don't see pure drafts unless sent/pending/paid/etc.
       filter.status = status || { $ne: "draft" };
     } else {
@@ -138,6 +150,56 @@ export const listInvoices = async (
   }
 };
 
+async function userCanAccessInvoice(
+  user: NonNullable<AuthRequest["user"]>,
+  invoice: {
+    billToUser?: { _id?: unknown } | unknown;
+    property?: { _id?: unknown; owner?: unknown } | unknown;
+  }
+): Promise<boolean> {
+  if (isStaffRole(user.role)) return true;
+
+  const userId = String(user._id);
+  const billTo = invoice.billToUser as { _id?: unknown } | string | undefined;
+  const billToId =
+    billTo && typeof billTo === "object" && "_id" in billTo
+      ? String(billTo._id)
+      : billTo
+        ? String(billTo)
+        : "";
+  if (billToId && billToId === userId) return true;
+
+  // Property owners may open invoices linked to their property
+  const prop = invoice.property as
+    | { _id?: unknown; owner?: { _id?: unknown } | unknown }
+    | string
+    | undefined;
+  if (!prop) return false;
+
+  if (typeof prop === "object" && prop.owner != null) {
+    const owner =
+      typeof prop.owner === "object" && prop.owner && "_id" in prop.owner
+        ? String((prop.owner as { _id: unknown })._id)
+        : String(prop.owner);
+    if (owner === userId) return true;
+  }
+
+  const propertyId =
+    typeof prop === "object" && prop._id != null
+      ? String(prop._id)
+      : String(prop);
+  if (!propertyId || propertyId === "undefined") return false;
+
+  const owned = await Property.findOne({
+    _id: propertyId,
+    owner: user._id,
+    isActive: true,
+  })
+    .select("_id")
+    .lean();
+  return Boolean(owned);
+}
+
 export const getInvoice = async (
   req: AuthRequest,
   res: Response,
@@ -147,7 +209,7 @@ export const getInvoice = async (
     const invoice = await Invoice.findById(req.params.id)
       .populate("client")
       .populate("job", "title priority status")
-      .populate("property", "name address city")
+      .populate("property", "name address city owner")
       .populate("bankAccount")
       .populate("billToUser", "fullName email phone")
       .populate("createdBy", "fullName email phone")
@@ -159,10 +221,8 @@ export const getInvoice = async (
     }
 
     const user = req.user!;
-    if (
-      !isStaffRole(user.role) &&
-      String(invoice.billToUser?._id || invoice.billToUser) !== String(user._id)
-    ) {
+    const allowed = await userCanAccessInvoice(user, invoice);
+    if (!allowed) {
       res.status(403).json({ success: false, message: "Not authorized" });
       return;
     }
@@ -481,8 +541,11 @@ export const markInvoicePaid = async (
     }
 
     const user = req.user!;
-    const admin = isStaffRole(user.role);
-    if (!admin && String(invoice.billToUser) !== String(user._id)) {
+    const allowed = await userCanAccessInvoice(user, {
+      billToUser: invoice.billToUser,
+      property: invoice.property,
+    });
+    if (!allowed) {
       res.status(403).json({ success: false, message: "Not authorized" });
       return;
     }
