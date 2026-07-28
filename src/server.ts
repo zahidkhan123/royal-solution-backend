@@ -21,6 +21,10 @@ import appNotificationRoutes from "./routes/appNotification.routes.js";
 import companySettingsRoutes from "./routes/companySettings.routes.js";
 import contactsRoutes from "./routes/contacts.routes.js";
 import { initializeCronJobs } from "./utils/cron.js";
+import {
+  ensureSingleUser,
+  isSingleUserMode,
+} from "./config/singleUser.js";
 
 dotenv.config();
 
@@ -98,6 +102,16 @@ app.use((_req: Request, res: Response): void => {
 
 app.listen(PORT, async () => {
   console.log(`🚀 Server running on port ${PORT}`);
+  if (isSingleUserMode()) {
+    try {
+      const u = await ensureSingleUser();
+      console.log(
+        `🔓 Single-user mode ON — local account ${u.email} (no login required)`
+      );
+    } catch (err) {
+      console.error("[single-user] Failed to bootstrap local account:", err);
+    }
+  }
   console.log(`📝 Environment: ${process.env.NODE_ENV || "development"}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
   try {

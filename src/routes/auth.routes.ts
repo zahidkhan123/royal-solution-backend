@@ -12,6 +12,8 @@ import {
   updateProfilePut,
   getNotificationPreferences,
   putNotificationPreferences,
+  singleUserSession,
+  authMode,
 } from "../controllers/auth.controller.js";
 import {
   googleLogin,
@@ -80,6 +82,20 @@ if (typeof router !== "function") {
   throw new Error("Router was not created properly");
 }
 console.log("✅ Router created successfully");
+
+/**
+ * @route   GET /api/auth/mode
+ * @desc    Public probe — whether single-user (no login) mode is on
+ * @access  Public
+ */
+router.get("/mode", authMode);
+
+/**
+ * @route   GET /api/auth/single-user-session
+ * @desc    Mint full-access local session (no credentials). SINGLE_USER_MODE only.
+ * @access  Public when single-user mode is enabled
+ */
+router.get("/single-user-session", singleUserSession);
 
 /**
  * @route   POST /api/auth/register

@@ -7,9 +7,14 @@ import { sendOTPEmail } from "../utils/email.js";
 import { ValidatedRequest } from "../middleware/validateBody.middleware.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
 import { IUser } from "../models/User.model.js";
+import {
+  isSingleUserMode,
+  mintSingleUserSession,
+  singleUserEmail,
+} from "../config/singleUser.js";
 
 function sanitizeUserResponse(user: IUser) {
-  return {
+  const base = {
     id: user._id,
     fullName: user.fullName ?? null,
     phone: user.phone ?? null,
@@ -33,6 +38,21 @@ function sanitizeUserResponse(user: IUser) {
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
+
+  if (
+    isSingleUserMode() &&
+    String(user.email || "").toLowerCase() === singleUserEmail()
+  ) {
+    return {
+      ...base,
+      isVerified: true,
+      isProfileCompleted: true,
+      isSingleUser: true,
+      accountType: "single_user",
+    };
+  }
+
+  return base;
 }
 
 function getDefaultNotificationPreferences() {
@@ -765,6 +785,62 @@ export const putNotificationPreferences = async (
           ...getDefaultNotificationPreferences(),
           ...(user.notificationPreferences || {}),
         },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Single-user mode: mint a full-access session with no credentials.
+ * GET /api/auth/single-user-session
+ * Only available when SINGLE_USER_MODE=true.
+ */
+export const singleUserSession = async (
+  _req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    if (!isSingleUserMode()) {
+      res.status(404).json({
+        success: false,
+        message: "Single-user mode is not enabled",
+      });
+      return;
+    }
+
+    const session = await mintSingleUserSession();
+    res.status(200).json({
+      success: true,
+      message: "Single-user session ready",
+      data: {
+        token: session.token,
+        accessToken: session.token,
+        user: session.user,
+        singleUserMode: true,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Lightweight probe so clients know whether to skip login/signup.
+ * GET /api/auth/mode
+ */
+export const authMode = async (
+  _req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    res.status(200).json({
+      success: true,
+      data: {
+        singleUserMode: isSingleUserMode(),
       },
     });
   } catch (error) {

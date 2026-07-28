@@ -1,9 +1,19 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import User, { IUser } from "../models/User.model.js";
+import {
+  getSingleUserDocument,
+  isSingleUserMode,
+} from "../config/singleUser.js";
 
 export interface AuthRequest extends Request {
   user?: IUser;
+}
+
+/** In single-user mode, attach the local full-access account when no token. */
+async function attachSingleUserIfEnabled(): Promise<IUser | null> {
+  if (!isSingleUserMode()) return null;
+  return getSingleUserDocument();
 }
 
 export const protect = async (
@@ -22,6 +32,12 @@ export const protect = async (
     }
 
     if (!token) {
+      const solo = await attachSingleUserIfEnabled();
+      if (solo) {
+        req.user = solo;
+        next();
+        return;
+      }
       res.status(401).json({
         success: false,
         message: "Not authorized to access this route",
@@ -36,6 +52,12 @@ export const protect = async (
       req.user = await User.findById(decoded.id).select("-password");
 
       if (!req.user) {
+        const solo = await attachSingleUserIfEnabled();
+        if (solo) {
+          req.user = solo;
+          next();
+          return;
+        }
         res.status(401).json({
           success: false,
           message: "User not found",
@@ -45,6 +67,12 @@ export const protect = async (
 
       next();
     } catch (error) {
+      const solo = await attachSingleUserIfEnabled();
+      if (solo) {
+        req.user = solo;
+        next();
+        return;
+      }
       res.status(401).json({
         success: false,
         message: "Not authorized to access this route",
@@ -156,7 +184,31 @@ export const AuthMiddleware = (...roles: string[]) => {
     ) {
       token = req.headers.authorization.split(" ")[1];
     }
+
+    const authorizeRoles = (): boolean => {
+      if (roles.length === 0) return true;
+      if (!req.user?.role) return false;
+      const userRoles = (
+        Array.isArray(req.user.role) ? req.user.role : [req.user.role]
+      ).map((r) => String(r).toLowerCase());
+      const needed = roles.map((r) => r.toLowerCase());
+      // Admin always passes role gates in single-user / staff setups
+      if (userRoles.includes("admin")) return true;
+      return needed.some((n) => userRoles.includes(n));
+    };
+
     if (!token) {
+      const solo = await attachSingleUserIfEnabled();
+      if (solo) {
+        req.user = solo;
+        if (!authorizeRoles()) {
+          return res.status(403).json({
+            success: false,
+            message: "Not authorized for this route",
+          });
+        }
+        return next();
+      }
       return res.status(401).json({
         success: false,
         message: "Not authorized to access this route",
@@ -169,17 +221,24 @@ export const AuthMiddleware = (...roles: string[]) => {
       };
       req.user = await User.findById(decoded.id).select("-password");
       if (!req.user) {
+        const solo = await attachSingleUserIfEnabled();
+        if (solo) {
+          req.user = solo;
+          if (!authorizeRoles()) {
+            return res.status(403).json({
+              success: false,
+              message: "Not authorized for this route",
+            });
+          }
+          return next();
+        }
         return res.status(401).json({
           success: false,
           message: "User not found",
         });
       }
 
-      // Authorization
-      if (
-        roles.length > 0 &&
-        (!req.user.role || !roles.includes((req.user.role as any)[0]))
-      ) {
+      if (!authorizeRoles()) {
         return res.status(403).json({
           success: false,
           message: `User role '${
@@ -190,6 +249,17 @@ export const AuthMiddleware = (...roles: string[]) => {
 
       return next();
     } catch (error) {
+      const solo = await attachSingleUserIfEnabled();
+      if (solo) {
+        req.user = solo;
+        if (!authorizeRoles()) {
+          return res.status(403).json({
+            success: false,
+            message: "Not authorized for this route",
+          });
+        }
+        return next();
+      }
       return res.status(401).json({
         success: false,
         message: "Not authorized to access this route",
