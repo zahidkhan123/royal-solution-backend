@@ -2,7 +2,10 @@ import mongoose, { Document, Schema } from "mongoose";
 import { PROPERTY_TYPES } from "../constants/maintenance.js";
 
 export interface IProperty extends Document {
+  /** App user who created / manages the property record */
   owner: mongoose.Types.ObjectId;
+  /** CRM contact (Client) this site belongs to — used for jobs & billing */
+  client?: mongoose.Types.ObjectId;
   name: string;
   type: string;
   address: string;
@@ -23,6 +26,11 @@ const propertySchema = new Schema<IProperty>(
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
+      index: true,
+    },
+    client: {
+      type: Schema.Types.ObjectId,
+      ref: "Client",
       index: true,
     },
     name: {
@@ -59,6 +67,7 @@ const propertySchema = new Schema<IProperty>(
 );
 
 propertySchema.index({ owner: 1, createdAt: -1 });
+propertySchema.index({ client: 1, createdAt: -1 });
 propertySchema.index({ name: "text", address: "text", city: "text" });
 
 export default mongoose.model<IProperty>("Property", propertySchema);

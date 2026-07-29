@@ -5,6 +5,7 @@ import Invoice, {
   type IInvoiceLineItem,
 } from "../models/Invoice.model.js";
 import Client from "../models/Client.model.js";
+import Item from "../models/Item.model.js";
 import Job from "../models/Job.model.js";
 import Property from "../models/Property.model.js";
 import CompanySettings, {
@@ -47,15 +48,29 @@ async function nextInvoiceNumber(): Promise<string> {
   return `${prefix}${String(seq).padStart(4, "0")}`;
 }
 
-function normalizeItems(items: unknown[]): IInvoiceLineItem[] {
+function parseImageList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((u) => (typeof u === "string" ? u.trim() : ""))
+    .filter(Boolean)
+    .slice(0, 10);
+}
+
+/**
+ * Normalize line items and snapshot catalog images onto each line
+ * (so invoices keep photos even if the library item changes later).
+ */
+async function normalizeItems(items: unknown[]): Promise<IInvoiceLineItem[]> {
   if (!Array.isArray(items)) return [];
-  return items.map((raw) => {
+
+  const parsed = items.map((raw) => {
     const r = raw as Record<string, unknown>;
     const quantity = Number(r.quantity) || 1;
     const price = Number(r.price) || 0;
     const discount = Number(r.discount) || 0;
     const tax = Number(r.tax) || 0;
-    const line = {
+    const images = parseImageList(r.images);
+    const line: IInvoiceLineItem = {
       item: r.item as IInvoiceLineItem["item"],
       name: String(r.name || "Item"),
       description: r.description ? String(r.description) : undefined,
@@ -65,10 +80,31 @@ function normalizeItems(items: unknown[]): IInvoiceLineItem[] {
       discount,
       tax,
       total: 0,
+      images: images.length ? images : undefined,
     };
     line.total = calcLineTotal(line);
     return line;
   });
+
+  // Backfill images from catalog when client didn't send them
+  const needLookup = parsed
+    .filter((l) => (!l.images || l.images.length === 0) && l.item)
+    .map((l) => String(l.item));
+  if (needLookup.length) {
+    const catalog = await Item.find({ _id: { $in: needLookup } })
+      .select("images")
+      .lean();
+    const byId = new Map(
+      catalog.map((it) => [String(it._id), parseImageList(it.images)])
+    );
+    for (const line of parsed) {
+      if (line.images?.length || !line.item) continue;
+      const imgs = byId.get(String(line.item));
+      if (imgs?.length) line.images = imgs;
+    }
+  }
+
+  return parsed;
 }
 
 export const listInvoices = async (
@@ -281,7 +317,7 @@ export const createInvoice = async (
       return;
     }
 
-    const lineItems = normalizeItems(items || []);
+    const lineItems = await normalizeItems(items || []);
     const totals = calcInvoiceTotals({
       items: lineItems,
       discountType: discountType || "fixed",
@@ -418,7 +454,7 @@ export const updateInvoice = async (
     }
 
     if (req.body.items) {
-      invoice.items = normalizeItems(req.body.items);
+      invoice.items = await normalizeItems(req.body.items);
     }
     if (req.body.discountType !== undefined)
       invoice.discountType = req.body.discountType;

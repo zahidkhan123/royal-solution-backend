@@ -1,4 +1,5 @@
 import { Response, NextFunction } from "express";
+import mongoose from "mongoose";
 import Job from "../models/Job.model.js";
 import Property from "../models/Property.model.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
@@ -98,7 +99,13 @@ export const getJob = async (
 ): Promise<void> => {
   try {
     const job = await Job.findById(req.params.id)
-      .populate("property")
+      .populate({
+        path: "property",
+        populate: {
+          path: "client",
+          select: "name email phone contactPerson",
+        },
+      })
       .populate("owner", "fullName email phone")
       .populate("assignedTechnician", "fullName email phone")
       .populate("invoice")
@@ -139,6 +146,10 @@ export const createJob = async (
       preferredTime,
       priority: rawPriority,
       attachments,
+      technicianName: rawTechnicianName,
+      technicianId: rawTechnicianId,
+      assignedTechnicianName,
+      assignedTechnicianId,
     } = req.body;
 
     if (!propertyId) {
@@ -154,7 +165,11 @@ export const createJob = async (
       return;
     }
 
-    if (String(property.owner) !== String(req.user!._id)) {
+    // Staff can create jobs for any property; end users only for their own
+    if (
+      !isStaffRole(req.user!.role) &&
+      String(property.owner) !== String(req.user!._id)
+    ) {
       res.status(403).json({
         success: false,
         message: "You can only create jobs for your own properties",
@@ -182,6 +197,39 @@ export const createJob = async (
       return;
     }
 
+    const technicianName = String(
+      rawTechnicianName || assignedTechnicianName || ""
+    ).trim();
+    const technicianId = String(
+      rawTechnicianId || assignedTechnicianId || ""
+    ).trim();
+    const hasAssignee = Boolean(technicianName || technicianId);
+
+    const timeline: {
+      status: JobStatus;
+      note: string;
+      changedBy: mongoose.Types.ObjectId;
+      at: Date;
+    }[] = [
+      {
+        status: "pending",
+        note: "Job created",
+        changedBy: req.user!._id as unknown as mongoose.Types.ObjectId,
+        at: new Date(),
+      },
+    ];
+
+    if (hasAssignee) {
+      timeline.push({
+        status: "assigned",
+        note: technicianName
+          ? `Assigned to ${technicianName}`
+          : "Employee assigned",
+        changedBy: req.user!._id as unknown as mongoose.Types.ObjectId,
+        at: new Date(),
+      });
+    }
+
     const job = await Job.create({
       owner: req.user!._id,
       property: propertyId,
@@ -190,21 +238,17 @@ export const createJob = async (
       category: category || "other",
       priority,
       priorityRank: PRIORITY_RANK[priority],
-      status: "pending",
+      status: hasAssignee ? "assigned" : "pending",
       preferredVisitDate: preferredVisitDate
         ? new Date(preferredVisitDate)
         : undefined,
       preferredTime,
       photos: Array.isArray(photos) ? photos : [],
       attachments: Array.isArray(attachments) ? attachments : [],
-      timeline: [
-        {
-          status: "pending",
-          note: "Job created",
-          changedBy: req.user!._id,
-          at: new Date(),
-        },
-      ],
+      assignedTechnician: technicianId || undefined,
+      assignedTechnicianName: technicianName || undefined,
+      assignedAt: hasAssignee ? new Date() : undefined,
+      timeline,
     });
 
     await notifyAdmins({

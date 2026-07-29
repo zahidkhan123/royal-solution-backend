@@ -19,6 +19,8 @@ export interface IInvoiceLineItem {
   discount: number;
   tax: number;
   total: number;
+  /** Snapshot of catalog item images at invoice time (optional) */
+  images?: string[];
 }
 
 export interface IInvoice extends Document {
@@ -100,6 +102,7 @@ const lineItemSchema = new Schema<IInvoiceLineItem>(
     discount: { type: Number, default: 0, min: 0 },
     tax: { type: Number, default: 0, min: 0 },
     total: { type: Number, default: 0, min: 0 },
+    images: [{ type: String }],
   },
   { _id: false }
 );

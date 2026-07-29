@@ -1,5 +1,6 @@
 import { Response, NextFunction } from "express";
 import Client from "../models/Client.model.js";
+import Property from "../models/Property.model.js";
 import User from "../models/User.model.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
 import { isClientUserRole, isStaffRole } from "../constants/maintenance.js";
@@ -102,7 +103,19 @@ export const getClient = async (
       res.status(404).json({ success: false, message: "Client not found" });
       return;
     }
-    res.status(200).json({ success: true, data: { client } });
+
+    const properties = await Property.find({
+      client: client._id,
+      isActive: true,
+    })
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      data: { client, properties },
+    });
   } catch (error) {
     next(error);
   }
