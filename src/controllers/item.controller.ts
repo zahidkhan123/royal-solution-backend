@@ -51,6 +51,32 @@ export const listItems = async (
   }
 };
 
+export const getItem = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    if (!isStaffRole(req.user!.role)) {
+      res.status(403).json({ success: false, message: "Admin only" });
+      return;
+    }
+
+    const item = await Item.findById(req.params.id).lean();
+    if (!item || item.isActive === false) {
+      res.status(404).json({ success: false, message: "Item not found" });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: { item },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const createItem = async (
   req: AuthRequest,
   res: Response,
@@ -73,8 +99,7 @@ export const createItem = async (
     if (Array.isArray(images)) {
       imageList = images
         .map((u) => String(u || "").trim())
-        .filter(Boolean)
-        .slice(0, 10);
+        .filter(Boolean);
     }
 
     const item = await Item.create({
@@ -137,8 +162,7 @@ export const updateItem = async (
       }
       item.images = req.body.images
         .map((u: unknown) => String(u || "").trim())
-        .filter(Boolean)
-        .slice(0, 10);
+        .filter(Boolean);
     }
 
     await item.save();

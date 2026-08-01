@@ -8,7 +8,7 @@ export interface IItem extends Document {
   unit: string;
   tax: number;
   defaultDiscount: number;
-  /** Image URLs (max 10) */
+  /** Image URLs (unlimited) */
   images: string[];
   isActive: boolean;
   createdAt: Date;
@@ -54,10 +54,6 @@ const itemSchema = new Schema<IItem>(
     images: {
       type: [String],
       default: [],
-      validate: {
-        validator: (v: string[]) => !v || v.length <= 10,
-        message: "Maximum 10 images allowed",
-      },
     },
     isActive: { type: Boolean, default: true },
   },
