@@ -63,7 +63,7 @@ export const PAYMENT_METHODS = [
   "online",
 ] as const;
 
-export const CURRENCIES = ["USD", "PKR", "EUR"] as const;
+export const CURRENCIES = ["USD", "PKR", "EUR", "GBP"] as const;
 
 export const INVOICE_LANGUAGES = ["en", "ar", "fr"] as const;
 
@@ -92,7 +92,7 @@ export const INVOICE_TEMPLATE_META: {
   {
     id: "classic",
     label: "Classic",
-    description: "Grey table header with total due banner",
+    description: "Royal layout with light-blue table and attachment pages",
   },
   {
     id: "serif",

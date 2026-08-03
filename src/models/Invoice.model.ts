@@ -55,7 +55,13 @@ export interface IInvoice extends Document {
     dueDate?: Date;
     cancelled: boolean;
   };
-  attachments: { name: string; url: string; type?: string }[];
+  attachments: {
+    name: string;
+    url: string;
+    type?: string;
+    /** Caption shown next to the attachment image on the PDF */
+    description?: string;
+  }[];
   notes?: {
     paymentTerms?: string;
     additionalNotes?: string;
@@ -196,6 +202,7 @@ const invoiceSchema = new Schema<IInvoice>(
         name: String,
         url: String,
         type: String,
+        description: String,
       },
     ],
     notes: {
