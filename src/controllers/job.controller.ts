@@ -58,11 +58,33 @@ export const listJobs = async (
       filter.$or = [{ title: re }, { description: re }];
     }
 
+    // Month / date range: match preferred visit date when set, else createdAt
+    // (same rule the app uses for calendar placement).
     if (req.query.from || req.query.to) {
-      const createdAt: Record<string, Date> = {};
-      if (req.query.from) createdAt.$gte = new Date(String(req.query.from));
-      if (req.query.to) createdAt.$lte = new Date(String(req.query.to));
-      filter.createdAt = createdAt;
+      const range: Record<string, Date> = {};
+      if (req.query.from) range.$gte = new Date(String(req.query.from));
+      if (req.query.to) range.$lte = new Date(String(req.query.to));
+      const dateOr = [
+        { preferredVisitDate: range },
+        {
+          $and: [
+            {
+              $or: [
+                { preferredVisitDate: null },
+                { preferredVisitDate: { $exists: false } },
+              ],
+            },
+            { createdAt: range },
+          ],
+        },
+      ];
+      if (filter.$or) {
+        // Combine with existing text search $or via $and
+        filter.$and = [{ $or: filter.$or as unknown[] }, { $or: dateOr }];
+        delete filter.$or;
+      } else {
+        filter.$or = dateOr;
+      }
     }
 
     const [total, jobs] = await Promise.all([

@@ -105,21 +105,29 @@ export const getProperty = async (
       return;
     }
 
-    const [jobs, invoices] = await Promise.all([
-      Job.find({ property: property._id })
-        .sort({ priorityRank: 1, createdAt: -1 })
-        .limit(50)
-        .lean(),
-      Invoice.find({
-        $or: [
-          { property: property._id },
-          { billToUser: property.owner },
-        ],
-      })
-        .sort({ createdAt: -1 })
-        .limit(50)
-        .lean(),
-    ]);
+    // Jobs for this property only
+    const jobs = await Job.find({ property: property._id })
+      .sort({ priorityRank: 1, createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    // Invoices linked to this property, or to jobs on this property.
+    // Do NOT include all billToUser invoices — that inflated counts across properties.
+    const jobIds = jobs.map((j) => j._id);
+    const invoiceFilter =
+      jobIds.length > 0
+        ? {
+            $or: [
+              { property: property._id },
+              { job: { $in: jobIds } },
+            ],
+          }
+        : { property: property._id };
+
+    const invoices = await Invoice.find(invoiceFilter)
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
 
     res.status(200).json({
       success: true,
