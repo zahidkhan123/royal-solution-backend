@@ -25,6 +25,7 @@ import {
   ensureSingleUser,
   isSingleUserMode,
 } from "./config/singleUser.js";
+import { s3CredentialDebug } from "./config/s3.js";
 
 dotenv.config();
 
@@ -57,6 +58,7 @@ app.get("/health", (_req: Request, res: Response) => {
     status: "OK",
     message: "API is running",
     timestamp: new Date().toISOString(),
+    s3: s3CredentialDebug,
   });
 });
 
@@ -85,7 +87,10 @@ app.use("/notifications", notificationsRoutes);
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction): void => {
   console.error("Error:", err);
-  const statusCode = (err as { status?: number }).status || 500;
+  const statusCode =
+    (err as { statusCode?: number }).statusCode ||
+    (err as { status?: number }).status ||
+    500;
   res.status(statusCode).json({
     success: false,
     message: err.message || "Internal Server Error",

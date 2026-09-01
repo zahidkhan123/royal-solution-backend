@@ -5,6 +5,7 @@ import {
   s3Client,
   S3_BUCKET_NAME,
   s3CredentialsConfigured,
+  s3CredentialDebug,
 } from "../config/s3.js";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -82,6 +83,8 @@ export async function uploadImageToS3(
         Key: key,
         Body: file.buffer,
         ContentType: file.mimetype,
+        CacheControl: "public, max-age=31536000, immutable",
+        ContentDisposition: "inline",
       })
     );
   } catch (err: unknown) {
@@ -101,8 +104,9 @@ export async function uploadImageToS3(
       code === "SignatureDoesNotMatch" ||
       msg.includes("SignatureDoesNotMatch")
     ) {
+      console.error("[S3] SignatureDoesNotMatch", s3CredentialDebug);
       throw new ImageValidationError(
-        "AWS rejected the secret key. Check AWS_SECRET_ACCESS_KEY in backend/.env (access key and secret may be swapped).",
+        `AWS rejected the secret key (SignatureDoesNotMatch). Railway AWS_SECRET_ACCESS_KEY length is ${s3CredentialDebug.secretLength} (expected 40). Paste the full key in Railway Variables WITHOUT quotes (it must include + and /), then redeploy.`,
         503
       );
     }

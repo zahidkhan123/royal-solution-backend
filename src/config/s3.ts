@@ -7,12 +7,43 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
+function stripQuotes(v: string): string {
+  const t = v.trim();
+  if (
+    (t.startsWith('"') && t.endsWith('"')) ||
+    (t.startsWith("'") && t.endsWith("'"))
+  ) {
+    return t.slice(1, -1);
+  }
+  return t;
+}
+
 function env(...keys: string[]): string {
   for (const k of keys) {
-    const v = process.env[k]?.trim();
+    const raw = process.env[k];
+    if (raw == null) continue;
+    const v = stripQuotes(raw);
     if (v) return v;
   }
   return "";
+}
+
+/**
+ * IAM secrets never contain spaces. Hosts often:
+ * - wrap the value in quotes (Railway / copied .env)
+ * - URL-decode '+' to space, or leave it as %2B
+ */
+function normalizeSecret(secret: string): string {
+  let v = stripQuotes(secret);
+  if (/%[0-9A-Fa-f]{2}/.test(v)) {
+    try {
+      v = decodeURIComponent(v);
+    } catch {
+      /* keep original */
+    }
+  }
+  if (v.includes(" ")) v = v.replace(/ /g, "+");
+  return v;
 }
 
 const PLACEHOLDERS = new Set([
@@ -27,11 +58,22 @@ function isPlaceholder(v: string): boolean {
   return PLACEHOLDERS.has(v) || v.startsWith("your-");
 }
 
-/** Prefer standard AWS_* names; fall back to legacy S3_* names used in this project. */
-let accessKeyId = env("AWS_ACCESS_KEY_ID", "S3_ACCESS_KEY");
-let secretAccessKey = env("AWS_SECRET_ACCESS_KEY", "S3_SECRET_KEY");
+/** Prefer standard AWS_* names; fall back to legacy / pasted aliases. */
+let accessKeyId = env("AWS_ACCESS_KEY_ID", "S3_ACCESS_KEY", "AccessKey");
+let secretAccessKey = normalizeSecret(
+  env("AWS_SECRET_ACCESS_KEY", "S3_SECRET_KEY", "Secretaccesskey")
+);
 const region = env("AWS_REGION", "S3_REGION") || "us-east-1";
 const bucket = env("S3_BUCKET_NAME", "S3_BUCKET");
+
+// Prefer a complete ~40-char secret if the primary value was truncated at '+'
+const aliasSecret = normalizeSecret(env("Secretaccesskey", "S3_SECRET_KEY"));
+if (secretAccessKey.length < 40 && aliasSecret.length > secretAccessKey.length) {
+  console.warn(
+    `[S3] AWS_SECRET_ACCESS_KEY looks truncated (len=${secretAccessKey.length}, expected ~40). Using a longer alias from env.`
+  );
+  secretAccessKey = aliasSecret;
+}
 
 // Common mix-up: access keys start with AKIA/ASIA; secrets are longer (~40 chars)
 const accessLooksLikeKey =
@@ -65,10 +107,29 @@ if (!s3CredentialsConfigured) {
   );
 }
 
+export const s3CredentialDebug = {
+  configured: s3CredentialsConfigured,
+  region,
+  bucket,
+  accessKeyPrefix: accessKeyId.slice(0, 4),
+  secretLength: secretAccessKey.length,
+  secretHasPlus: secretAccessKey.includes("+"),
+  secretHasSlash: secretAccessKey.includes("/"),
+};
+
+if (s3CredentialsConfigured && secretAccessKey.length !== 40) {
+  console.warn(
+    `[S3] Secret key length is ${secretAccessKey.length} (IAM secrets are usually 40 chars). A truncated or URL-decoded '+' is a common cause of SignatureDoesNotMatch.`
+  );
+}
+
 export const s3Client = new S3Client({
   region,
   credentials: {
     accessKeyId,
     secretAccessKey,
   },
+  // Avoid SDK-default checksum headers that some S3 setups reject as SignatureDoesNotMatch
+  requestChecksumCalculation: "WHEN_REQUIRED",
+  responseChecksumValidation: "WHEN_REQUIRED",
 });
