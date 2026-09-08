@@ -55,6 +55,16 @@ export const INVOICE_STATUSES = [
 ] as const;
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 
+export const QUOTE_STATUSES = [
+  "draft",
+  "sent",
+  "accepted",
+  "declined",
+  "expired",
+  "converted",
+] as const;
+export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
+
 export const PAYMENT_METHODS = [
   "cash",
   "card",
@@ -63,7 +73,7 @@ export const PAYMENT_METHODS = [
   "online",
 ] as const;
 
-export const CURRENCIES = ["USD", "PKR", "EUR", "GBP"] as const;
+export const CURRENCIES = ["GBP", "USD", "PKR", "EUR"] as const;
 
 export const INVOICE_LANGUAGES = ["en", "ar", "fr"] as const;
 

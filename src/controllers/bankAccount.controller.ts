@@ -112,8 +112,18 @@ export const updateBankAccount = async (
 
     for (const f of fields) {
       if (req.body[f] !== undefined) {
-        (account as unknown as Record<string, unknown>)[f] = req.body[f];
+        const value = req.body[f];
+        (account as unknown as Record<string, unknown>)[f] =
+          typeof value === "string" ? value.trim() : value;
       }
+    }
+
+    if (!account.bankName || !account.accountHolder || !account.accountNumber) {
+      res.status(400).json({
+        success: false,
+        message: "Bank name, account holder, and account number are required",
+      });
+      return;
     }
 
     if (req.body.isDefault === true) {

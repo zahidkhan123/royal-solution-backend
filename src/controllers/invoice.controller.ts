@@ -30,8 +30,10 @@ function resolveTemplateId(raw: unknown, fallback: string): InvoiceTemplateId {
 }
 
 async function nextInvoiceNumber(): Promise<string> {
-  const year = new Date().getFullYear();
-  const prefix = `INV-${year}-`;
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const prefix = `INV-${year}-${month}-`;
   const last = await Invoice.findOne({
     invoiceNumber: new RegExp(`^${prefix}`),
   })
@@ -386,7 +388,7 @@ export const createInvoice = async (
       discountValue: Number(discountValue) || 0,
       paymentMethod,
       shippingCost: Number(shippingCost) || 0,
-      currency: currency || "USD",
+      currency: currency || "GBP",
       language: language || "en",
       ...totals,
       bankAccount: bankAccountId,
@@ -406,7 +408,7 @@ export const createInvoice = async (
         userId: linkedBillToUser,
         type: "invoice_generated",
         title: "Invoice generated",
-        body: `Invoice ${number} · ${totals.grandTotal} ${currency || "USD"}`,
+        body: `Invoice ${number} · ${totals.grandTotal} ${currency || "GBP"}`,
         data: { invoiceId: String(invoice._id), invoiceNumber: number },
       });
       if (deposit && !deposit.cancelled) {
@@ -414,7 +416,7 @@ export const createInvoice = async (
           userId: linkedBillToUser,
           type: "deposit_requested",
           title: "Deposit requested",
-          body: `Deposit of ${deposit.amount} ${currency || "USD"} requested`,
+          body: `Deposit of ${deposit.amount} ${currency || "GBP"} requested`,
           data: { invoiceId: String(invoice._id) },
         });
       }

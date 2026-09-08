@@ -8,6 +8,9 @@ export type NotificationType =
   | "invoice_generated"
   | "payment_received"
   | "deposit_requested"
+  | "quote_sent"
+  | "quote_accepted"
+  | "quote_declined"
   | "general";
 
 export interface IAppNotification extends Document {
@@ -40,6 +43,9 @@ const notificationSchema = new Schema<IAppNotification>(
         "invoice_generated",
         "payment_received",
         "deposit_requested",
+        "quote_sent",
+        "quote_accepted",
+        "quote_declined",
         "general",
       ],
       default: "general",
