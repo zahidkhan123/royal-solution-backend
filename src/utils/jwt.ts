@@ -9,9 +9,6 @@ dotenv.config();
 export const generateToken = (userId: string): string => {
   const secret = process.env.JWT_SECRET;
   const expiresIn = process.env.JWT_EXPIRE_IN || "7d";
-  console.log("expiresIn", expiresIn);
-  console.log("process.env.JWT_EXPIRE_IN", process.env.JWT_EXPIRE_IN);
-  console.log("process.env.JWT_SECRET", process.env.JWT_SECRET);
   if (!secret) {
     throw new Error("JWT_SECRET is not defined in environment variables");
   }

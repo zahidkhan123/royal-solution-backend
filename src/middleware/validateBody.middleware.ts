@@ -19,9 +19,6 @@ export interface ValidatedQueryRequest<T = any> extends Request {
  */
 export const validateBody = (schema: Joi.ObjectSchema) => {
   return (req: ValidatedRequest, res: Response, next: NextFunction): void => {
-    // Debug: Log the incoming request body
-    console.log("Validating request body:", JSON.stringify(req.body, null, 2));
-
     const { error, value } = schema.validate(req.body, {
       abortEarly: false,
       stripUnknown: true, // Strip fields not in schema
@@ -30,7 +27,6 @@ export const validateBody = (schema: Joi.ObjectSchema) => {
 
     if (error) {
       const errorMessages = error.details.map((detail) => detail.message);
-      console.log("Error message", errorMessages);
       const errorDetails = error.details.map((detail) => ({
         message: detail.message,
         path: detail.path,

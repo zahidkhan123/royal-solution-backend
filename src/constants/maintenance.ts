@@ -95,39 +95,39 @@ export const INVOICE_TEMPLATE_META: {
   description: string;
 }[] = [
   {
-    id: "stripe",
-    label: "Stripe",
-    description: "Colored payment strip, logo top-right",
-  },
-  {
     id: "classic",
     label: "Classic",
-    description: "Royal layout with light-blue table and attachment pages",
+    description: "Soft-blue table, refined letterhead",
+  },
+  {
+    id: "stripe",
+    label: "Stripe",
+    description: "Bold accent header with amount due",
   },
   {
     id: "serif",
     label: "Serif",
-    description: "Centered elegant letterhead",
+    description: "Warm editorial letterhead",
   },
   {
     id: "modern",
     label: "Modern",
-    description: "Clean asymmetric header",
+    description: "Large type, dark table",
   },
   {
     id: "simple",
     label: "Simple",
-    description: "Minimal document",
+    description: "Compact one-page layout",
   },
   {
     id: "professional",
     label: "Professional",
-    description: "Two-column header with accent",
+    description: "Dark sidebar, branded accent",
   },
   {
     id: "minimal",
     label: "Minimal",
-    description: "Plain print-friendly layout",
+    description: "Quiet print-first layout",
   },
 ];
 

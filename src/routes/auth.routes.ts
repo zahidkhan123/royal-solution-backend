@@ -66,8 +66,6 @@ for (const [name, value] of Object.entries(imports)) {
   if (value === undefined) {
     console.error(`❌ ${name} is undefined!`);
     missingImports.push(name);
-  } else {
-    console.log(`✅ ${name} is defined (${typeof value})`);
   }
 }
 
@@ -81,7 +79,6 @@ if (missingImports.length > 0) {
 if (typeof router !== "function") {
   throw new Error("Router was not created properly");
 }
-console.log("✅ Router created successfully");
 
 /**
  * @route   GET /api/auth/mode

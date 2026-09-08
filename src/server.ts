@@ -49,11 +49,6 @@ app.use(express.json({ limit: "10mb", strict: false }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use(limiter);
 
-app.use((req: Request, _res: Response, next: NextFunction) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
-  next();
-});
-
 app.get("/health", (_req: Request, res: Response) => {
   res.status(200).json({
     status: "OK",
