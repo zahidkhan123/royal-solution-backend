@@ -9,6 +9,8 @@ import {
   acceptQuote,
   declineQuote,
   convertQuote,
+  duplicateQuote,
+  deleteQuote,
 } from "../controllers/quote.controller.js";
 
 const router = express.Router();
@@ -22,5 +24,7 @@ router.post("/:id/send", sendQuote);
 router.post("/:id/accept", acceptQuote);
 router.post("/:id/decline", declineQuote);
 router.post("/:id/convert", convertQuote);
+router.post("/:id/duplicate", duplicateQuote);
+router.delete("/:id", deleteQuote);
 
 export default router;

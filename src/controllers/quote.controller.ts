@@ -244,7 +244,24 @@ export const listQuotes = async (
 
     if (q) {
       const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-      filter.quoteNumber = re;
+      const matchingClients = await Client.find({ name: re })
+        .select("_id")
+        .lean();
+      const searchOr: Record<string, unknown>[] = [
+        { quoteNumber: re },
+        { referenceNumber: re },
+      ];
+      if (matchingClients.length) {
+        searchOr.push({
+          client: { $in: matchingClients.map((c) => c._id) },
+        });
+      }
+      if (filter.$or) {
+        filter.$and = [{ $or: filter.$or }, { $or: searchOr }];
+        delete filter.$or;
+      } else {
+        filter.$or = searchOr;
+      }
     }
     if (jobId) filter.job = jobId;
 
@@ -726,12 +743,26 @@ export const convertQuote = async (
       });
       return;
     }
-    if (quote.status !== "accepted") {
+    if (quote.status === "declined" || quote.status === "expired") {
       res.status(400).json({
         success: false,
-        message: "Accept the quote before converting it to an invoice",
+        message: `Cannot convert a ${quote.status} quote`,
       });
       return;
+    }
+    if (!["draft", "sent", "accepted"].includes(quote.status)) {
+      res.status(400).json({
+        success: false,
+        message: "This quote cannot be converted to an invoice",
+      });
+      return;
+    }
+
+    if (quote.status === "draft" || quote.status === "sent") {
+      quote.status = "accepted";
+      quote.acceptedAt = quote.acceptedAt || new Date();
+      quote.acceptedBy =
+        quote.acceptedBy || (req.user!._id as mongoose.Types.ObjectId);
     }
 
     const invoiceNumber = await nextInvoiceNumber();
@@ -744,6 +775,7 @@ export const convertQuote = async (
       quote: quote._id,
       invoiceNumber,
       issueDate: new Date(),
+      dueDate: quote.validUntil,
       items: quote.items,
       discountType: quote.discountType,
       discountValue: quote.discountValue,
@@ -801,6 +833,103 @@ export const convertQuote = async (
       success: true,
       message: "Quote converted to invoice",
       data: { quote: populatedQuote, invoice: populatedInvoice },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const duplicateQuote = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    if (!isStaffRole(req.user!.role)) {
+      res.status(403).json({ success: false, message: "Staff only" });
+      return;
+    }
+
+    const source = await Quote.findById(req.params.id);
+    if (!source) {
+      res.status(404).json({ success: false, message: "Quote not found" });
+      return;
+    }
+
+    const validUntil = new Date();
+    validUntil.setDate(validUntil.getDate() + 30);
+
+    const quote = await Quote.create({
+      createdBy: req.user!._id,
+      client: source.client,
+      billToUser: source.billToUser,
+      job: source.job,
+      property: source.property,
+      quoteNumber: await nextQuoteNumber(),
+      issueDate: new Date(),
+      validUntil,
+      referenceNumber: source.referenceNumber,
+      status: "draft",
+      items: JSON.parse(JSON.stringify(source.items || [])),
+      discountType: source.discountType,
+      discountValue: source.discountValue,
+      shippingCost: source.shippingCost,
+      currency: source.currency,
+      language: source.language,
+      subtotal: source.subtotal,
+      discountAmount: source.discountAmount,
+      taxAmount: source.taxAmount,
+      grandTotal: source.grandTotal,
+      attachments: source.attachments,
+      notes: source.notes,
+      templateId: source.templateId,
+      companySnapshot: source.companySnapshot,
+    });
+
+    const populated = await Quote.findById(quote._id)
+      .populate(quotePopulate as unknown as string)
+      .lean();
+
+    res.status(201).json({
+      success: true,
+      message: "Quote duplicated",
+      data: { quote: populated },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteQuote = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    if (!isStaffRole(req.user!.role)) {
+      res.status(403).json({ success: false, message: "Staff only" });
+      return;
+    }
+
+    const quote = await Quote.findById(req.params.id);
+    if (!quote) {
+      res.status(404).json({ success: false, message: "Quote not found" });
+      return;
+    }
+
+    if (quote.status === "converted" || quote.invoice) {
+      res.status(400).json({
+        success: false,
+        message: "Cannot delete a converted quote. Open the invoice instead.",
+      });
+      return;
+    }
+
+    await quote.deleteOne();
+
+    res.status(200).json({
+      success: true,
+      message: "Quote deleted",
     });
   } catch (error) {
     next(error);
