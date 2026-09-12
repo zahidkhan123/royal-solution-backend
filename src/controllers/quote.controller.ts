@@ -39,11 +39,15 @@ function resolveTemplateId(raw: unknown, fallback: string): InvoiceTemplateId {
   return "classic";
 }
 
+function dateStamp(d = new Date()): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}${month}${day}`;
+}
+
 async function nextQuoteNumber(): Promise<string> {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const prefix = `Q-${year}-${month}-`;
+  const prefix = dateStamp();
   const last = await Quote.findOne({
     quoteNumber: new RegExp(`^${prefix}`),
   })
@@ -51,20 +55,16 @@ async function nextQuoteNumber(): Promise<string> {
     .select("quoteNumber")
     .lean();
 
-  let seq = 1;
-  if (last?.quoteNumber) {
-    const part = last.quoteNumber.split("-").pop();
-    const n = parseInt(part || "0", 10);
-    if (!Number.isNaN(n)) seq = n + 1;
-  }
-  return `${prefix}${String(seq).padStart(4, "0")}`;
+  if (!last?.quoteNumber) return prefix;
+
+  const extra = last.quoteNumber.slice(prefix.length);
+  const n = extra ? parseInt(extra, 10) : 1;
+  const next = Number.isNaN(n) ? 2 : n + 1;
+  return next <= 1 ? prefix : `${prefix}${String(next).padStart(2, "0")}`;
 }
 
 async function nextInvoiceNumber(): Promise<string> {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const prefix = `INV-${year}-${month}-`;
+  const prefix = dateStamp();
   const last = await Invoice.findOne({
     invoiceNumber: new RegExp(`^${prefix}`),
   })
@@ -72,13 +72,12 @@ async function nextInvoiceNumber(): Promise<string> {
     .select("invoiceNumber")
     .lean();
 
-  let seq = 1;
-  if (last?.invoiceNumber) {
-    const part = last.invoiceNumber.split("-").pop();
-    const n = parseInt(part || "0", 10);
-    if (!Number.isNaN(n)) seq = n + 1;
-  }
-  return `${prefix}${String(seq).padStart(4, "0")}`;
+  if (!last?.invoiceNumber) return prefix;
+
+  const extra = last.invoiceNumber.slice(prefix.length);
+  const n = extra ? parseInt(extra, 10) : 1;
+  const next = Number.isNaN(n) ? 2 : n + 1;
+  return next <= 1 ? prefix : `${prefix}${String(next).padStart(2, "0")}`;
 }
 
 function parseImageList(raw: unknown): string[] {
