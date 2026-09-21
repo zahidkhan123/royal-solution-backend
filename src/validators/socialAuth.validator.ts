@@ -6,6 +6,7 @@ import Joi from "joi";
 export const googleLoginSchema = Joi.object({
   idToken: Joi.string().optional(),
   accessToken: Joi.string().optional(),
+  accountType: Joi.string().valid("user", "contractor").optional(),
 }).or("idToken", "accessToken").messages({
   "object.missing": "Either Google ID token or access token is required",
 });
@@ -26,6 +27,7 @@ export const appleLoginSchema = Joi.object({
   idToken: Joi.string().required().messages({
     "string.empty": "Apple ID token is required",
   }),
+  accountType: Joi.string().valid("user", "contractor").optional(),
   user: Joi.object({
     fullName: Joi.object({
       givenName: Joi.string(),

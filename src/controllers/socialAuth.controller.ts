@@ -20,6 +20,14 @@ const getFacebookAppSecretProof = (accessToken: string): string | undefined => {
     .digest("hex");
 };
 
+function resolveSignupRole(accountType?: string): UserRole {
+  const raw = String(accountType || "user")
+    .trim()
+    .toLowerCase();
+  if (raw === "contractor") return UserRole.CONTRACTOR;
+  return UserRole.USER;
+}
+
 /**
  * Verify Google ID token or access token and create/login user
  * POST /api/auth/social/google
@@ -30,7 +38,7 @@ export const googleLogin = async (
   _: NextFunction
 ): Promise<void> => {
   try {
-    const { idToken, accessToken } = req.validatedBody!;
+    const { idToken, accessToken, accountType } = req.validatedBody!;
 
     if (!idToken && !accessToken) {
       res.status(400).json({
@@ -156,7 +164,7 @@ export const googleLogin = async (
         provider: AuthProvider.GOOGLE,
         socialId,
         profileImage: picture,
-        role: [UserRole.USER],
+        role: [resolveSignupRole(accountType)],
         isVerified: true, // Google accounts are considered verified
         verifiedAt: new Date(),
       });
@@ -369,7 +377,7 @@ export const appleLogin = async (
   _: NextFunction
 ): Promise<void> => {
   try {
-    const { idToken, user: appleUser } = req.validatedBody!;
+    const { idToken, user: appleUser, accountType } = req.validatedBody!;
 
     if (!idToken) {
       res.status(400).json({
@@ -457,7 +465,7 @@ export const appleLogin = async (
         email: userEmail.toLowerCase(),
         provider: AuthProvider.APPLE,
         socialId,
-        role: [UserRole.USER],
+        role: [resolveSignupRole(accountType)],
         isVerified: true, // Apple accounts are considered verified
         verifiedAt: new Date(),
       });
