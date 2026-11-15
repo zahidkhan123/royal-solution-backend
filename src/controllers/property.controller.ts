@@ -4,7 +4,7 @@ import Client from "../models/Client.model.js";
 import Job from "../models/Job.model.js";
 import Invoice from "../models/Invoice.model.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
-import { isStaffRole } from "../constants/maintenance.js";
+import { isOwnedBy } from "../constants/maintenance.js";
 
 async function resolveClientId(
   clientId: unknown
@@ -40,12 +40,7 @@ export const listProperties = async (
           ? req.query.clientId
           : undefined;
 
-    const filter: Record<string, unknown> = { isActive: true };
-    if (!isStaffRole(user.role)) {
-      filter.owner = user._id;
-    } else if (req.query.owner) {
-      filter.owner = req.query.owner;
-    }
+    const filter: Record<string, unknown> = { isActive: true, owner: user._id };
     if (clientId) {
       filter.client = clientId;
     }
@@ -97,10 +92,7 @@ export const getProperty = async (
     }
 
     const user = req.user!;
-    if (
-      !isStaffRole(user.role) &&
-      String(property.owner?._id || property.owner) !== String(user._id)
-    ) {
+    if (!isOwnedBy(property.owner, user)) {
       res.status(403).json({ success: false, message: "Not authorized" });
       return;
     }
@@ -211,10 +203,7 @@ export const updateProperty = async (
       return;
     }
 
-    if (
-      !isStaffRole(req.user!.role) &&
-      String(property.owner) !== String(req.user!._id)
-    ) {
+    if (!isOwnedBy(property.owner, req.user)) {
       res.status(403).json({ success: false, message: "Not authorized" });
       return;
     }
@@ -276,10 +265,7 @@ export const deleteProperty = async (
       return;
     }
 
-    if (
-      !isStaffRole(req.user!.role) &&
-      String(property.owner) !== String(req.user!._id)
-    ) {
+    if (!isOwnedBy(property.owner, req.user)) {
       res.status(403).json({ success: false, message: "Not authorized" });
       return;
     }

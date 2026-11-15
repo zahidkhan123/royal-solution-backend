@@ -117,6 +117,7 @@ export const getAdminDashboard = async (
     endOfDay.setHours(23, 59, 59, 999);
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
+    const uid = req.user!._id;
     const [
       todaysJobs,
       pendingJobs,
@@ -134,31 +135,40 @@ export const getAdminDashboard = async (
       revenueByMonth,
     ] = await Promise.all([
       Job.countDocuments({
+        owner: uid,
         createdAt: { $gte: startOfDay, $lte: endOfDay },
       }),
-      Job.countDocuments({ status: "pending" }),
+      Job.countDocuments({ owner: uid, status: "pending" }),
       Job.countDocuments({
+        owner: uid,
         priority: "P1",
         status: { $nin: ["completed", "cancelled", "rejected"] },
       }),
       Job.countDocuments({
+        owner: uid,
         status: { $in: ["pending", "assigned", "accepted", "in_progress"] },
       }),
-      Job.countDocuments({ status: "completed" }),
+      Job.countDocuments({ owner: uid, status: "completed" }),
       Invoice.aggregate([
+        { $match: { createdBy: uid } },
         { $group: { _id: "$status", count: { $sum: 1 } } },
       ]),
       Invoice.aggregate([
-        { $match: { status: "paid" } },
+        { $match: { createdBy: uid, status: "paid" } },
         { $group: { _id: null, total: { $sum: "$grandTotal" } } },
       ]),
       Invoice.aggregate([
-        { $match: { status: { $in: ["sent", "pending", "overdue"] } } },
+        {
+          $match: {
+            createdBy: uid,
+            status: { $in: ["sent", "pending", "overdue"] },
+          },
+        },
         { $group: { _id: null, total: { $sum: "$grandTotal" }, count: { $sum: 1 } } },
       ]),
-      Client.countDocuments({ isActive: true }),
-      Property.countDocuments({ isActive: true }),
-      Job.find()
+      Client.countDocuments({ createdBy: uid, isActive: true }),
+      Property.countDocuments({ owner: uid, isActive: true }),
+      Job.find({ owner: uid })
         .sort({ priorityRank: 1, createdAt: -1 })
         .limit(10)
         .populate("property", "name address")
@@ -167,15 +177,20 @@ export const getAdminDashboard = async (
       Job.aggregate([
         {
           $match: {
+            owner: uid,
             status: { $nin: ["completed", "cancelled", "rejected"] },
           },
         },
         { $group: { _id: "$priority", count: { $sum: 1 } } },
       ]),
-      Job.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
+      Job.aggregate([
+        { $match: { owner: uid } },
+        { $group: { _id: "$status", count: { $sum: 1 } } },
+      ]),
       Invoice.aggregate([
         {
           $match: {
+            createdBy: uid,
             status: "paid",
             paidAt: {
               $gte: new Date(now.getFullYear(), now.getMonth() - 5, 1),

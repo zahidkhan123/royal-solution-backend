@@ -34,6 +34,30 @@ export const JOB_CATEGORIES = [
   "other",
 ] as const;
 
+export const PROJECT_STATUSES = ["active", "archived"] as const;
+export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
+
+export const PROJECT_MEMBER_ROLES = [
+  "client",
+  "site_manager",
+  "subcontractor",
+  "other",
+] as const;
+export type ProjectMemberRole = (typeof PROJECT_MEMBER_ROLES)[number];
+
+/** Todoist-style project colours. Any #RRGGBB is also accepted. */
+export const PROJECT_COLORS = [
+  "#E44332",
+  "#FF9933",
+  "#FAD000",
+  "#299438",
+  "#6ACCBC",
+  "#158FAD",
+  "#884DFF",
+  "#EB96EB",
+  "#808080",
+] as const;
+
 export const PROPERTY_TYPES = [
   "apartment",
   "house",
@@ -169,13 +193,28 @@ export function isContractorRole(
 }
 
 /**
- * Staff = Admin or Contractor.
- * Can manage all jobs, invoices, clients, items, bank accounts (ops surface).
+ * Feature access: every signed-in user can use the full app.
+ * Record lists and edits are still scoped to that user via isOwnedBy.
  */
 export function isStaffRole(
-  role: string | string[] | undefined | null
+  _role?: string | string[] | null
 ): boolean {
-  return isAdminRole(role) || isContractorRole(role);
+  return true;
+}
+
+/** True when a record's owner/createdBy matches the signed-in user. */
+export function isOwnedBy(
+  recordOwner: unknown,
+  user: { _id?: unknown } | null | undefined
+): boolean {
+  if (recordOwner == null || user == null || user._id == null) return false;
+  const ownerId =
+    typeof recordOwner === "object" &&
+    recordOwner !== null &&
+    "_id" in (recordOwner as object)
+      ? String((recordOwner as { _id: unknown })._id)
+      : String(recordOwner);
+  return ownerId === String(user._id);
 }
 
 export function isClientUserRole(

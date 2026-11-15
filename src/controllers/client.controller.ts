@@ -3,7 +3,7 @@ import Client from "../models/Client.model.js";
 import Property from "../models/Property.model.js";
 import User from "../models/User.model.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
-import { isClientUserRole, isStaffRole } from "../constants/maintenance.js";
+import { isClientUserRole, isStaffRole, isOwnedBy } from "../constants/maintenance.js";
 
 async function resolveLinkedUser(
   userId: unknown
@@ -50,7 +50,10 @@ export const listClients = async (
     );
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
 
-    const filter: Record<string, unknown> = { isActive: true };
+    const filter: Record<string, unknown> = {
+      isActive: true,
+      createdBy: req.user!._id,
+    };
     if (q) {
       const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
       filter.$or = [
@@ -103,9 +106,14 @@ export const getClient = async (
       res.status(404).json({ success: false, message: "Client not found" });
       return;
     }
+    if (!isOwnedBy(client.createdBy, req.user)) {
+      res.status(403).json({ success: false, message: "Not authorized" });
+      return;
+    }
 
     const properties = await Property.find({
       client: client._id,
+      owner: req.user!._id,
       isActive: true,
     })
       .sort({ createdAt: -1 })
@@ -198,6 +206,10 @@ export const updateClient = async (
       res.status(404).json({ success: false, message: "Client not found" });
       return;
     }
+    if (!isOwnedBy(client.createdBy, req.user)) {
+      res.status(403).json({ success: false, message: "Not authorized" });
+      return;
+    }
 
     const fields = [
       "name",
@@ -253,6 +265,10 @@ export const deleteClient = async (
     const client = await Client.findById(req.params.id);
     if (!client || !client.isActive) {
       res.status(404).json({ success: false, message: "Client not found" });
+      return;
+    }
+    if (!isOwnedBy(client.createdBy, req.user)) {
+      res.status(403).json({ success: false, message: "Not authorized" });
       return;
     }
     client.isActive = false;

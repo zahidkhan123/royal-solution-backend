@@ -20,6 +20,7 @@ import {
   facebookLogin,
   appleLogin,
 } from "../controllers/socialAuth.controller.js";
+import { deleteUserAccount } from "../controllers/user.controller.js";
 import { AuthMiddleware } from "../middleware/auth.middleware.js";
 import { validateBody } from "../middleware/validateBody.middleware.js";
 import {
@@ -174,6 +175,13 @@ router.patch(
   validateBody(updateProfileSchema),
   updateProfile
 );
+
+/**
+ * @route   DELETE /api/auth/profile
+ * @desc    Permanently delete the signed-in account and its records
+ * @access  Private
+ */
+router.delete("/profile", AuthMiddleware(), deleteUserAccount);
 
 router.get(
   "/notification-preferences",

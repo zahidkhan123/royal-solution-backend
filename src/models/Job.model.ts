@@ -33,6 +33,10 @@ export interface IJob extends Document {
   assignedTechnicianName?: string;
   assignedAt?: Date;
   invoice?: mongoose.Types.ObjectId;
+  /** Programme of work this job is filed under. Missing means Inbox. */
+  project?: mongoose.Types.ObjectId | null;
+  /** Section subdocument id on that project. */
+  section?: mongoose.Types.ObjectId | null;
   timeline: IJobTimelineEntry[];
   createdAt: Date;
   updatedAt: Date;
@@ -103,6 +107,14 @@ const jobSchema = new Schema<IJob>(
       type: Schema.Types.ObjectId,
       ref: "Invoice",
     },
+    project: {
+      type: Schema.Types.ObjectId,
+      ref: "Project",
+      index: true,
+    },
+    section: {
+      type: Schema.Types.ObjectId,
+    },
     timeline: [
       {
         status: { type: String, enum: JOB_STATUSES },
@@ -134,6 +146,7 @@ jobSchema.pre("save", function (next) {
 
 jobSchema.index({ status: 1, priorityRank: 1, createdAt: -1 });
 jobSchema.index({ owner: 1, status: 1 });
+jobSchema.index({ owner: 1, project: 1, section: 1 });
 jobSchema.index({ title: "text", description: "text" });
 
 export default mongoose.model<IJob>("Job", jobSchema);

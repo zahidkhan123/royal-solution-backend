@@ -15,11 +15,13 @@ import { AuthRequest } from "../middleware/auth.middleware.js";
 import {
   INVOICE_TEMPLATE_IDS,
   isStaffRole,
+  isOwnedBy,
   type InvoiceTemplateId,
 } from "../constants/maintenance.js";
 import {
   createNotification,
 } from "../services/appNotification.service.js";
+import { resolveProjectAssignment } from "../utils/projectLink.js";
 
 function resolveTemplateId(raw: unknown, fallback: string): InvoiceTemplateId {
   const id = typeof raw === "string" ? raw : fallback;
@@ -127,26 +129,12 @@ export const listInvoices = async (
     const status =
       typeof req.query.status === "string" ? req.query.status : undefined;
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    const projectId =
+      typeof req.query.project === "string" ? req.query.project.trim() : "";
 
-    const filter: Record<string, unknown> = {};
-    if (!isStaffRole(user.role)) {
-      // Property owners: invoices billed to them OR linked to their properties
-      const ownedProps = await Property.find({
-        owner: user._id,
-        isActive: true,
-      })
-        .select("_id")
-        .lean();
-      const propertyIds = ownedProps.map((p) => p._id);
-      filter.$or = [
-        { billToUser: user._id },
-        ...(propertyIds.length ? [{ property: { $in: propertyIds } }] : []),
-      ];
-      // Users don't see pure drafts unless sent/pending/paid/etc.
-      filter.status = status || { $ne: "draft" };
-    } else {
-      if (status) filter.status = status;
-    }
+    const filter: Record<string, unknown> = { createdBy: user._id };
+    if (status) filter.status = status;
+    if (projectId) filter.project = projectId;
 
     if (q) {
       const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
@@ -194,11 +182,12 @@ export const listInvoices = async (
 async function userCanAccessInvoice(
   user: NonNullable<AuthRequest["user"]>,
   invoice: {
+    createdBy?: { _id?: unknown } | unknown;
     billToUser?: { _id?: unknown } | unknown;
     property?: { _id?: unknown; owner?: unknown } | unknown;
   }
 ): Promise<boolean> {
-  if (isStaffRole(user.role)) return true;
+  if (isOwnedBy(invoice.createdBy, user)) return true;
 
   const userId = String(user._id);
   const billTo = invoice.billToUser as { _id?: unknown } | string | undefined;
@@ -309,6 +298,7 @@ export const createInvoice = async (
       status,
       saveAsDraft,
       templateId: bodyTemplateId,
+      projectId,
     } = req.body;
 
     if (!clientId) {
@@ -351,6 +341,22 @@ export const createInvoice = async (
 
     let linkedBillToUser = billToUser || client.user;
     let linkedProperty = propertyId;
+    let linkedProject: unknown;
+    if (projectId) {
+      const link = await resolveProjectAssignment({
+        user: req.user!,
+        projectId,
+        propertyId: propertyId || undefined,
+      });
+      if (!link.ok) {
+        res.status(link.status).json({ success: false, message: link.message });
+        return;
+      }
+      if (!link.cleared && link.projectId) {
+        linkedProject = link.projectId;
+        linkedProperty = linkedProperty || link.propertyId;
+      }
+    }
     if (jobId) {
       const job = await Job.findById(jobId);
       if (job) {
@@ -380,6 +386,7 @@ export const createInvoice = async (
       billToUser: linkedBillToUser,
       job: jobId,
       property: linkedProperty,
+      project: linkedProject,
       invoiceNumber: number,
       issueDate: issueDate ? new Date(issueDate) : new Date(),
       dueDate: dueDate ? new Date(dueDate) : undefined,
@@ -457,6 +464,10 @@ export const updateInvoice = async (
       res.status(404).json({ success: false, message: "Invoice not found" });
       return;
     }
+    if (!isOwnedBy(invoice.createdBy, req.user)) {
+      res.status(403).json({ success: false, message: "Not authorized" });
+      return;
+    }
 
     if (req.body.items) {
       invoice.items = await normalizeItems(req.body.items);
@@ -487,6 +498,21 @@ export const updateInvoice = async (
     if (req.body.attachments !== undefined)
       invoice.attachments = req.body.attachments;
     if (req.body.clientId !== undefined) invoice.client = req.body.clientId;
+    if (req.body.projectId !== undefined) {
+      const link = await resolveProjectAssignment({
+        user: req.user!,
+        projectId: req.body.projectId,
+        propertyId: invoice.property,
+      });
+      if (!link.ok) {
+        res.status(link.status).json({ success: false, message: link.message });
+        return;
+      }
+      invoice.set("project", link.cleared ? null : link.projectId);
+      if (!link.cleared && !invoice.property && link.propertyId) {
+        invoice.property = link.propertyId;
+      }
+    }
     if (req.body.templateId !== undefined) {
       invoice.templateId = resolveTemplateId(req.body.templateId, "classic");
     }
@@ -583,6 +609,7 @@ export const markInvoicePaid = async (
 
     const user = req.user!;
     const allowed = await userCanAccessInvoice(user, {
+      createdBy: invoice.createdBy,
       billToUser: invoice.billToUser,
       property: invoice.property,
     });

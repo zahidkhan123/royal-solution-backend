@@ -18,10 +18,12 @@ import {
   INVOICE_TEMPLATE_IDS,
   QUOTE_STATUSES,
   isStaffRole,
+  isOwnedBy,
   type InvoiceTemplateId,
   type QuoteStatus,
 } from "../constants/maintenance.js";
 import { createNotification } from "../services/appNotification.service.js";
+import { resolveProjectAssignment } from "../utils/projectLink.js";
 
 const OPEN_QUOTE_STATUSES: QuoteStatus[] = ["draft", "sent"];
 const TERMINAL_QUOTE_STATUSES: QuoteStatus[] = [
@@ -157,11 +159,12 @@ async function expireOverdueQuotes(): Promise<void> {
 async function userCanAccessQuote(
   user: NonNullable<AuthRequest["user"]>,
   quote: {
+    createdBy?: { _id?: unknown } | unknown;
     billToUser?: { _id?: unknown } | unknown;
     property?: { _id?: unknown; owner?: unknown } | unknown;
   }
 ): Promise<boolean> {
-  if (isStaffRole(user.role)) return true;
+  if (isOwnedBy(quote.createdBy, user)) return true;
 
   const userId = String(user._id);
   const billTo = quote.billToUser as { _id?: unknown } | string | undefined;
@@ -220,30 +223,20 @@ export const listQuotes = async (
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
     const jobId =
       typeof req.query.job === "string" ? req.query.job.trim() : "";
+    const projectId =
+      typeof req.query.project === "string" ? req.query.project.trim() : "";
 
     await expireOverdueQuotes();
 
-    const filter: Record<string, unknown> = {};
-    if (!isStaffRole(user.role)) {
-      const ownedProps = await Property.find({
-        owner: user._id,
-        isActive: true,
-      })
-        .select("_id")
-        .lean();
-      const propertyIds = ownedProps.map((p) => p._id);
-      filter.$or = [
-        { billToUser: user._id },
-        ...(propertyIds.length ? [{ property: { $in: propertyIds } }] : []),
-      ];
-      filter.status = status || { $ne: "draft" };
-    } else if (status) {
-      filter.status = status;
-    }
+    const filter: Record<string, unknown> = { createdBy: user._id };
+    if (status) filter.status = status;
 
     if (q) {
       const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-      const matchingClients = await Client.find({ name: re })
+      const matchingClients = await Client.find({
+        name: re,
+        createdBy: user._id,
+      })
         .select("_id")
         .lean();
       const searchOr: Record<string, unknown>[] = [
@@ -263,6 +256,7 @@ export const listQuotes = async (
       }
     }
     if (jobId) filter.job = jobId;
+    if (projectId) filter.project = projectId;
 
     const [total, quotes] = await Promise.all([
       Quote.countDocuments(filter),
@@ -352,6 +346,7 @@ export const createQuote = async (
       status,
       saveAsDraft,
       templateId: bodyTemplateId,
+      projectId,
     } = req.body;
 
     if (!clientId) {
@@ -375,6 +370,22 @@ export const createQuote = async (
 
     let linkedBillToUser = billToUser || client.user;
     let linkedProperty = propertyId;
+    let linkedProject: unknown;
+    if (projectId) {
+      const link = await resolveProjectAssignment({
+        user: req.user!,
+        projectId,
+        propertyId: propertyId || undefined,
+      });
+      if (!link.ok) {
+        res.status(link.status).json({ success: false, message: link.message });
+        return;
+      }
+      if (!link.cleared && link.projectId) {
+        linkedProject = link.projectId;
+        linkedProperty = linkedProperty || link.propertyId;
+      }
+    }
     if (jobId) {
       const job = await Job.findById(jobId);
       if (job) {
@@ -407,6 +418,7 @@ export const createQuote = async (
       billToUser: linkedBillToUser,
       job: jobId,
       property: linkedProperty,
+      project: linkedProject,
       quoteNumber: number,
       issueDate: issueDate ? new Date(issueDate) : new Date(),
       validUntil: validUntilRaw ? new Date(validUntilRaw) : undefined,
@@ -465,6 +477,10 @@ export const updateQuote = async (
       res.status(404).json({ success: false, message: "Quote not found" });
       return;
     }
+    if (!isOwnedBy(quote.createdBy, req.user)) {
+      res.status(403).json({ success: false, message: "Not authorized" });
+      return;
+    }
 
     if (TERMINAL_QUOTE_STATUSES.includes(quote.status)) {
       res.status(400).json({
@@ -497,6 +513,21 @@ export const updateQuote = async (
     if (req.body.attachments !== undefined)
       quote.attachments = req.body.attachments;
     if (req.body.clientId !== undefined) quote.client = req.body.clientId;
+    if (req.body.projectId !== undefined) {
+      const link = await resolveProjectAssignment({
+        user: req.user!,
+        projectId: req.body.projectId,
+        propertyId: quote.property,
+      });
+      if (!link.ok) {
+        res.status(link.status).json({ success: false, message: link.message });
+        return;
+      }
+      quote.set("project", link.cleared ? null : link.projectId);
+      if (!link.cleared && !quote.property && link.propertyId) {
+        quote.property = link.propertyId;
+      }
+    }
     if (req.body.templateId !== undefined) {
       quote.templateId = resolveTemplateId(req.body.templateId, "classic");
     }
@@ -571,6 +602,10 @@ export const sendQuote = async (
       res.status(404).json({ success: false, message: "Quote not found" });
       return;
     }
+    if (!isOwnedBy(quote.createdBy, req.user)) {
+      res.status(403).json({ success: false, message: "Not authorized" });
+      return;
+    }
     if (quote.status !== "draft" && quote.status !== "sent") {
       res.status(400).json({
         success: false,
@@ -620,6 +655,7 @@ export const acceptQuote = async (
     }
 
     const allowed = await userCanAccessQuote(req.user!, {
+      createdBy: quote.createdBy,
       billToUser: quote.billToUser,
       property: quote.property,
     });
@@ -676,6 +712,7 @@ export const declineQuote = async (
     }
 
     const allowed = await userCanAccessQuote(req.user!, {
+      createdBy: quote.createdBy,
       billToUser: quote.billToUser,
       property: quote.property,
     });
@@ -734,6 +771,10 @@ export const convertQuote = async (
       res.status(404).json({ success: false, message: "Quote not found" });
       return;
     }
+    if (!isOwnedBy(quote.createdBy, req.user)) {
+      res.status(403).json({ success: false, message: "Not authorized" });
+      return;
+    }
 
     if (quote.status === "converted" || quote.invoice) {
       res.status(400).json({
@@ -771,6 +812,7 @@ export const convertQuote = async (
       billToUser: quote.billToUser,
       job: quote.job,
       property: quote.property,
+      project: quote.project,
       quote: quote._id,
       invoiceNumber,
       issueDate: new Date(),
@@ -854,6 +896,10 @@ export const duplicateQuote = async (
       res.status(404).json({ success: false, message: "Quote not found" });
       return;
     }
+    if (!isOwnedBy(source.createdBy, req.user)) {
+      res.status(403).json({ success: false, message: "Not authorized" });
+      return;
+    }
 
     const validUntil = new Date();
     validUntil.setDate(validUntil.getDate() + 30);
@@ -913,6 +959,10 @@ export const deleteQuote = async (
     const quote = await Quote.findById(req.params.id);
     if (!quote) {
       res.status(404).json({ success: false, message: "Quote not found" });
+      return;
+    }
+    if (!isOwnedBy(quote.createdBy, req.user)) {
+      res.status(403).json({ success: false, message: "Not authorized" });
       return;
     }
 

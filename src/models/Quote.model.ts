@@ -17,6 +17,7 @@ export interface IQuote extends Document {
   billToUser?: mongoose.Types.ObjectId;
   job?: mongoose.Types.ObjectId;
   property?: mongoose.Types.ObjectId;
+  project?: mongoose.Types.ObjectId | null;
   quoteNumber: string;
   issueDate: Date;
   validUntil?: Date;
@@ -119,6 +120,11 @@ const quoteSchema = new Schema<IQuote>(
     property: {
       type: Schema.Types.ObjectId,
       ref: "Property",
+    },
+    project: {
+      type: Schema.Types.ObjectId,
+      ref: "Project",
+      index: true,
     },
     quoteNumber: {
       type: String,

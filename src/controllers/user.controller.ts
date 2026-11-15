@@ -1,6 +1,19 @@
 import { Response, NextFunction } from "express";
 import mongoose from "mongoose";
 import User, { IUser } from "../models/User.model.js";
+import Job from "../models/Job.model.js";
+import Property from "../models/Property.model.js";
+import Project from "../models/Project.model.js";
+import WeeklyReport from "../models/WeeklyReport.model.js";
+import Invoice from "../models/Invoice.model.js";
+import Quote from "../models/Quote.model.js";
+import Client from "../models/Client.model.js";
+import Item from "../models/Item.model.js";
+import BankAccount from "../models/BankAccount.model.js";
+import CompanySettings from "../models/CompanySettings.model.js";
+import AppNotification from "../models/AppNotification.model.js";
+import NotificationPreference from "../models/NotificationPreference.model.js";
+import OTP from "../models/OTP.model.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
 
 function sanitizeUserResponse(user: IUser) {
@@ -94,11 +107,38 @@ export const deleteUserAccount = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const user = await User.findByIdAndDelete(req.user!._id);
+    const userId = req.user!._id;
+    const user = await User.findById(userId);
     if (!user) {
       res.status(404).json({ success: false, message: "User not found" });
       return;
     }
+
+    const owned = { owner: userId };
+    const created = { createdBy: userId };
+
+    await Promise.all([
+      Job.deleteMany(owned),
+      Property.deleteMany(owned),
+      Project.deleteMany(owned),
+      WeeklyReport.deleteMany(owned),
+      Invoice.deleteMany(created),
+      Quote.deleteMany(created),
+      Client.deleteMany(created),
+      Item.deleteMany(created),
+      BankAccount.deleteMany(created),
+      CompanySettings.deleteMany(created),
+      AppNotification.deleteMany({ user: userId }),
+      NotificationPreference.deleteMany({ userId }),
+      OTP.deleteMany({ email: user.email }),
+      User.updateMany(
+        { blockedUsers: userId },
+        { $pull: { blockedUsers: userId } }
+      ),
+    ]);
+
+    await User.findByIdAndDelete(userId);
+
     res.status(200).json({
       success: true,
       message: "Account deleted successfully",

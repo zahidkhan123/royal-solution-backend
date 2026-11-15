@@ -21,6 +21,7 @@ import dashboardRoutes from "./routes/dashboard.routes.js";
 import appNotificationRoutes from "./routes/appNotification.routes.js";
 import companySettingsRoutes from "./routes/companySettings.routes.js";
 import contactsRoutes from "./routes/contacts.routes.js";
+import projectRoutes from "./routes/project.routes.js";
 import { initializeCronJobs } from "./utils/cron.js";
 import {
   ensureSingleUser,
@@ -78,6 +79,7 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/app-notifications", appNotificationRoutes);
 app.use("/api/company-settings", companySettingsRoutes);
 app.use("/api/contacts", contactsRoutes);
+app.use("/api/projects", projectRoutes);
 
 // Proxy-friendly aliases (path may arrive without /api)
 app.use("/notifications", notificationsRoutes);

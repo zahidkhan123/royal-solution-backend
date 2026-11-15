@@ -1,7 +1,7 @@
 import { Response, NextFunction } from "express";
 import Item from "../models/Item.model.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
-import { isStaffRole } from "../constants/maintenance.js";
+import { isStaffRole, isOwnedBy } from "../constants/maintenance.js";
 
 export const listItems = async (
   req: AuthRequest,
@@ -21,7 +21,10 @@ export const listItems = async (
     );
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
 
-    const filter: Record<string, unknown> = { isActive: true };
+    const filter: Record<string, unknown> = {
+      isActive: true,
+      createdBy: req.user!._id,
+    };
     if (q) {
       const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
       filter.$or = [{ name: re }, { description: re }];
@@ -65,6 +68,10 @@ export const getItem = async (
     const item = await Item.findById(req.params.id).lean();
     if (!item || item.isActive === false) {
       res.status(404).json({ success: false, message: "Item not found" });
+      return;
+    }
+    if (!isOwnedBy(item.createdBy, req.user)) {
+      res.status(403).json({ success: false, message: "Not authorized" });
       return;
     }
 
@@ -139,6 +146,10 @@ export const updateItem = async (
       res.status(404).json({ success: false, message: "Item not found" });
       return;
     }
+    if (!isOwnedBy(item.createdBy, req.user)) {
+      res.status(403).json({ success: false, message: "Not authorized" });
+      return;
+    }
 
     const fields = [
       "name",
@@ -189,6 +200,10 @@ export const deleteItem = async (
     const item = await Item.findById(req.params.id);
     if (!item || !item.isActive) {
       res.status(404).json({ success: false, message: "Item not found" });
+      return;
+    }
+    if (!isOwnedBy(item.createdBy, req.user)) {
+      res.status(403).json({ success: false, message: "Not authorized" });
       return;
     }
     item.isActive = false;

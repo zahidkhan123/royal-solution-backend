@@ -62,19 +62,11 @@ function getDefaultNotificationPreferences() {
   };
 }
 
-/**
- * Map client account type → UserRole (never allow Admin via public register).
- */
-function resolveSignupRole(
-  accountType?: string,
-  roleAlias?: string
-): UserRole {
-  const raw = String(accountType || roleAlias || "user")
-    .trim()
-    .toLowerCase();
-  if (raw === "contractor") return UserRole.CONTRACTOR;
-  return UserRole.USER;
-}
+const FULL_ACCESS_ROLES: UserRole[] = [
+  UserRole.ADMIN,
+  UserRole.CONTRACTOR,
+  UserRole.USER,
+];
 
 /**
  * Register a new account.
@@ -87,7 +79,7 @@ export const register = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const { email, password, acceptedTerms, accountType, role } =
+    const { email, password, acceptedTerms } =
       req.validatedBody! as {
         email: string;
         password: string;
@@ -96,7 +88,6 @@ export const register = async (
         role?: string;
       };
     const emailNorm = (email as string).toLowerCase().trim();
-    const assignedRole = resolveSignupRole(accountType, role);
 
     // Use exact match so DB index is used (schema has lowercase: true)
     const existingUser = await User.findOne({ email: emailNorm });
@@ -128,7 +119,7 @@ export const register = async (
       fullName: fullNamePlaceholder,
       email: emailNorm,
       password,
-      role: [assignedRole],
+      role: FULL_ACCESS_ROLES,
       isVerified: false,
       isProfileCompleted: false,
       acceptedTermsAt: acceptedTerms ? new Date() : undefined,
@@ -149,16 +140,13 @@ export const register = async (
     );
 
     const token = generateToken(String(user._id));
-    const accountLabel =
-      assignedRole === UserRole.CONTRACTOR ? "Contractor" : "User";
 
     res.status(201).json({
       success: true,
-      message: `${accountLabel} registered successfully. OTP sent to email for verification.`,
+      message:
+        "Account registered successfully. OTP sent to email for verification.",
       data: {
         user: sanitizeUserResponse(user),
-        accountType:
-          assignedRole === UserRole.CONTRACTOR ? "contractor" : "user",
         token,
         accessToken: token,
         refreshToken: token,

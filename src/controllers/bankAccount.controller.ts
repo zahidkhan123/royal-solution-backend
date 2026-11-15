@@ -1,7 +1,7 @@
 import { Response, NextFunction } from "express";
 import BankAccount from "../models/BankAccount.model.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
-import { isStaffRole } from "../constants/maintenance.js";
+import { isStaffRole, isOwnedBy } from "../constants/maintenance.js";
 
 export const listBankAccounts = async (
   req: AuthRequest,
@@ -14,7 +14,10 @@ export const listBankAccounts = async (
       return;
     }
 
-    const accounts = await BankAccount.find({ isActive: true })
+    const accounts = await BankAccount.find({
+      isActive: true,
+      createdBy: req.user!._id,
+    })
       .sort({ isDefault: -1, createdAt: -1 })
       .lean();
 
@@ -99,6 +102,10 @@ export const updateBankAccount = async (
       res.status(404).json({ success: false, message: "Account not found" });
       return;
     }
+    if (!isOwnedBy(account.createdBy, req.user)) {
+      res.status(403).json({ success: false, message: "Not authorized" });
+      return;
+    }
 
     const fields = [
       "bankName",
@@ -128,7 +135,11 @@ export const updateBankAccount = async (
 
     if (req.body.isDefault === true) {
       await BankAccount.updateMany(
-        { isActive: true, _id: { $ne: account._id } },
+        {
+          isActive: true,
+          createdBy: req.user!._id,
+          _id: { $ne: account._id },
+        },
         { $set: { isDefault: false } }
       );
       account.isDefault = true;
@@ -160,6 +171,10 @@ export const deleteBankAccount = async (
     const account = await BankAccount.findById(req.params.id);
     if (!account || !account.isActive) {
       res.status(404).json({ success: false, message: "Account not found" });
+      return;
+    }
+    if (!isOwnedBy(account.createdBy, req.user)) {
+      res.status(403).json({ success: false, message: "Not authorized" });
       return;
     }
     account.isActive = false;

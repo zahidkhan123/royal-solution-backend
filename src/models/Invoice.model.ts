@@ -30,6 +30,7 @@ export interface IInvoice extends Document {
   billToUser?: mongoose.Types.ObjectId;
   job?: mongoose.Types.ObjectId;
   property?: mongoose.Types.ObjectId;
+  project?: mongoose.Types.ObjectId | null;
   /** Source quote when this invoice was converted from one */
   quote?: mongoose.Types.ObjectId;
   invoiceNumber: string;
@@ -142,6 +143,11 @@ const invoiceSchema = new Schema<IInvoice>(
     property: {
       type: Schema.Types.ObjectId,
       ref: "Property",
+    },
+    project: {
+      type: Schema.Types.ObjectId,
+      ref: "Project",
+      index: true,
     },
     quote: {
       type: Schema.Types.ObjectId,

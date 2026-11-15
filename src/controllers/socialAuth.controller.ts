@@ -20,13 +20,11 @@ const getFacebookAppSecretProof = (accessToken: string): string | undefined => {
     .digest("hex");
 };
 
-function resolveSignupRole(accountType?: string): UserRole {
-  const raw = String(accountType || "user")
-    .trim()
-    .toLowerCase();
-  if (raw === "contractor") return UserRole.CONTRACTOR;
-  return UserRole.USER;
-}
+const FULL_ACCESS_ROLES: UserRole[] = [
+  UserRole.ADMIN,
+  UserRole.CONTRACTOR,
+  UserRole.USER,
+];
 
 /**
  * Verify Google ID token or access token and create/login user
@@ -38,7 +36,7 @@ export const googleLogin = async (
   _: NextFunction
 ): Promise<void> => {
   try {
-    const { idToken, accessToken, accountType } = req.validatedBody!;
+    const { idToken, accessToken } = req.validatedBody!;
 
     if (!idToken && !accessToken) {
       res.status(400).json({
@@ -164,7 +162,7 @@ export const googleLogin = async (
         provider: AuthProvider.GOOGLE,
         socialId,
         profileImage: picture,
-        role: [resolveSignupRole(accountType)],
+        role: FULL_ACCESS_ROLES,
         isVerified: true, // Google accounts are considered verified
         verifiedAt: new Date(),
       });
@@ -329,7 +327,7 @@ export const facebookLogin = async (
         provider: AuthProvider.FACEBOOK,
         socialId,
         profileImage,
-        role: [UserRole.USER],
+        role: FULL_ACCESS_ROLES,
         isVerified: true, // Facebook accounts are considered verified
         verifiedAt: new Date(),
       });
@@ -377,7 +375,7 @@ export const appleLogin = async (
   _: NextFunction
 ): Promise<void> => {
   try {
-    const { idToken, user: appleUser, accountType } = req.validatedBody!;
+    const { idToken, user: appleUser } = req.validatedBody!;
 
     if (!idToken) {
       res.status(400).json({
@@ -465,7 +463,7 @@ export const appleLogin = async (
         email: userEmail.toLowerCase(),
         provider: AuthProvider.APPLE,
         socialId,
-        role: [resolveSignupRole(accountType)],
+        role: FULL_ACCESS_ROLES,
         isVerified: true, // Apple accounts are considered verified
         verifiedAt: new Date(),
       });

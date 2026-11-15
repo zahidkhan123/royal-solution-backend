@@ -8,6 +8,7 @@ import {
   JOB_STATUSES,
   PRIORITY_RANK,
   isStaffRole,
+  isOwnedBy,
   parseJobQuickEntry,
   type JobPriority,
   type JobStatus,
@@ -16,6 +17,10 @@ import {
   createNotification,
   notifyAdmins,
 } from "../services/appNotification.service.js";
+import {
+  resolveProjectAssignment,
+  resolveSectionId,
+} from "../utils/projectLink.js";
 
 export const listJobs = async (
   req: AuthRequest,
@@ -38,13 +43,12 @@ export const listJobs = async (
       typeof req.query.category === "string" ? req.query.category : undefined;
     const propertyId =
       typeof req.query.property === "string" ? req.query.property : undefined;
+    const projectId =
+      typeof req.query.project === "string" ? req.query.project : undefined;
+    const inbox =
+      req.query.inbox === "1" || req.query.inbox === "true";
 
-    const filter: Record<string, unknown> = {};
-    if (!isStaffRole(user.role)) {
-      filter.owner = user._id;
-    } else if (req.query.owner) {
-      filter.owner = req.query.owner;
-    }
+    const filter: Record<string, unknown> = { owner: user._id };
 
     if (status) filter.status = status;
     if (priority && JOB_PRIORITIES.includes(priority as JobPriority)) {
@@ -52,6 +56,8 @@ export const listJobs = async (
     }
     if (category) filter.category = category;
     if (propertyId) filter.property = propertyId;
+    if (projectId) filter.project = projectId;
+    else if (inbox) filter.project = null;
 
     if (q) {
       const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
@@ -93,6 +99,7 @@ export const listJobs = async (
         .populate("property", "name address city")
         .populate("owner", "fullName email phone")
         .populate("assignedTechnician", "fullName email phone")
+        .populate("project", "name color")
         .sort({ priorityRank: 1, createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
@@ -138,10 +145,7 @@ export const getJob = async (
       return;
     }
 
-    if (
-      !isStaffRole(req.user!.role) &&
-      String(job.owner?._id || job.owner) !== String(req.user!._id)
-    ) {
+    if (!isOwnedBy(job.owner, req.user)) {
       res.status(403).json({ success: false, message: "Not authorized" });
       return;
     }
@@ -168,6 +172,8 @@ export const createJob = async (
       preferredTime,
       priority: rawPriority,
       attachments,
+      projectId,
+      sectionId,
       technicianName: rawTechnicianName,
       technicianId: rawTechnicianId,
       assignedTechnicianName,
@@ -187,16 +193,39 @@ export const createJob = async (
       return;
     }
 
-    // Staff can create jobs for any property; end users only for their own
-    if (
-      !isStaffRole(req.user!.role) &&
-      String(property.owner) !== String(req.user!._id)
-    ) {
+    if (!isOwnedBy(property.owner, req.user)) {
       res.status(403).json({
         success: false,
         message: "You can only create jobs for your own properties",
       });
       return;
+    }
+
+    let linkedProject: mongoose.Types.ObjectId | undefined;
+    let linkedSection: mongoose.Types.ObjectId | undefined;
+    if (projectId) {
+      const link = await resolveProjectAssignment({
+        user: req.user!,
+        projectId,
+        propertyId,
+      });
+      if (!link.ok) {
+        res.status(link.status).json({ success: false, message: link.message });
+        return;
+      }
+      if (!link.cleared && link.projectId) {
+        linkedProject = link.projectId;
+        if (sectionId) {
+          const section = await resolveSectionId(link.projectId, sectionId);
+          if (!section.ok) {
+            res
+              .status(section.status)
+              .json({ success: false, message: section.message });
+            return;
+          }
+          if (section.sectionId) linkedSection = section.sectionId;
+        }
+      }
     }
 
     // Todoist-style quick entry: parse p1–p4 from title
@@ -270,6 +299,8 @@ export const createJob = async (
       assignedTechnician: technicianId || undefined,
       assignedTechnicianName: technicianName || undefined,
       assignedAt: hasAssignee ? new Date() : undefined,
+      project: linkedProject,
+      section: linkedSection,
       timeline,
     });
 
@@ -294,6 +325,53 @@ export const createJob = async (
   }
 };
 
+async function applyJobProject(
+  job: InstanceType<typeof Job>,
+  body: { projectId?: unknown; sectionId?: unknown },
+  user: { _id?: unknown }
+): Promise<{ status: number; message: string } | null> {
+  const setsProject = body.projectId !== undefined;
+  const setsSection = body.sectionId !== undefined;
+
+  if (setsProject && (body.projectId === null || body.projectId === "")) {
+    job.set("project", null);
+    job.set("section", null);
+    return null;
+  }
+
+  const projectId = setsProject ? body.projectId : job.project;
+  if (!projectId) {
+    return { status: 400, message: "Choose a project before setting a section" };
+  }
+
+  const link = await resolveProjectAssignment({
+    user,
+    projectId,
+    propertyId: job.property,
+  });
+  if (!link.ok) return { status: link.status, message: link.message };
+  if (link.cleared || !link.projectId) {
+    job.set("project", null);
+    job.set("section", null);
+    return null;
+  }
+
+  job.set("project", link.projectId);
+
+  if (setsSection) {
+    const section = await resolveSectionId(link.projectId, body.sectionId);
+    if (!section.ok) return { status: section.status, message: section.message };
+    job.set("section", section.sectionId);
+    return null;
+  }
+
+  if (job.section) {
+    const stillThere = await resolveSectionId(link.projectId, job.section);
+    if (!stillThere.ok || !stillThere.sectionId) job.set("section", null);
+  }
+  return null;
+}
+
 export const updateJob = async (
   req: AuthRequest,
   res: Response,
@@ -307,19 +385,46 @@ export const updateJob = async (
     }
 
     const admin = isStaffRole(req.user!.role);
-    const isOwner = String(job.owner) === String(req.user!._id);
+    const isOwner = isOwnedBy(job.owner, req.user);
 
-    if (!admin && !isOwner) {
+    if (!isOwner) {
       res.status(403).json({ success: false, message: "Not authorized" });
       return;
     }
 
+    if (req.body.projectId !== undefined || req.body.sectionId !== undefined) {
+      const filingError = await applyJobProject(job, req.body, req.user!);
+      if (filingError) {
+        res.status(filingError.status).json({
+          success: false,
+          message: filingError.message,
+        });
+        return;
+      }
+    }
+
+    const filingKeys = new Set(["projectId", "sectionId"]);
+    const hasOtherEdits = Object.keys(req.body).some((key) => !filingKeys.has(key));
+
     // Users can only edit limited fields while pending
     if (!admin) {
-      if (job.status !== "pending") {
+      if (job.status !== "pending" && hasOtherEdits) {
         res.status(400).json({
           success: false,
           message: "Only pending jobs can be edited",
+        });
+        return;
+      }
+      if (job.status !== "pending") {
+        await job.save();
+        const populatedEarly = await Job.findById(job._id)
+          .populate("property", "name address city")
+          .populate("project", "name color")
+          .lean();
+        res.status(200).json({
+          success: true,
+          message: "Job updated",
+          data: { job: populatedEarly },
         });
         return;
       }
@@ -385,6 +490,7 @@ export const updateJob = async (
     const populated = await Job.findById(job._id)
       .populate("property", "name address city")
       .populate("assignedTechnician", "fullName email phone")
+      .populate("project", "name color")
       .lean();
 
     res.status(200).json({
@@ -446,6 +552,10 @@ export const updateJobStatus = async (
     const job = await Job.findById(req.params.id);
     if (!job) {
       res.status(404).json({ success: false, message: "Job not found" });
+      return;
+    }
+    if (!isOwnedBy(job.owner, req.user)) {
+      res.status(403).json({ success: false, message: "Not authorized" });
       return;
     }
 
@@ -511,6 +621,10 @@ export const assignJob = async (
     const job = await Job.findById(req.params.id);
     if (!job) {
       res.status(404).json({ success: false, message: "Job not found" });
+      return;
+    }
+    if (!isOwnedBy(job.owner, req.user)) {
+      res.status(403).json({ success: false, message: "Not authorized" });
       return;
     }
 
