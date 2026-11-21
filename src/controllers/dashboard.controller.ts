@@ -164,7 +164,14 @@ export const getAdminDashboard = async (
             status: { $in: ["sent", "pending", "overdue"] },
           },
         },
-        { $group: { _id: null, total: { $sum: "$grandTotal" }, count: { $sum: 1 } } },
+        // Outstanding = what's still owed after deposits (older invoices: full total).
+        {
+          $group: {
+            _id: null,
+            total: { $sum: { $ifNull: ["$amountDue", "$grandTotal"] } },
+            count: { $sum: 1 },
+          },
+        },
       ]),
       Client.countDocuments({ createdBy: uid, isActive: true }),
       Property.countDocuments({ owner: uid, isActive: true }),

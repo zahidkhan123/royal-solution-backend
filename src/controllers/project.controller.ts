@@ -143,22 +143,26 @@ export const createProject = async (
       res.status(400).json({ success: false, message: "Project name is required" });
       return;
     }
-    if (!mongoose.isValidObjectId(propertyId)) {
-      res.status(400).json({ success: false, message: "A site is required" });
-      return;
-    }
-    const property = await Property.findById(propertyId);
-    if (!property || !property.isActive) {
-      res.status(404).json({ success: false, message: "Property not found" });
-      return;
-    }
-    if (!isOwnedBy(property.owner, req.user)) {
-      res.status(403).json({ success: false, message: "Not authorized" });
-      return;
+    // Only the name is required; site, contact, colour and description are optional.
+    let property: InstanceType<typeof Property> | null = null;
+    if (propertyId) {
+      if (!mongoose.isValidObjectId(propertyId)) {
+        res.status(400).json({ success: false, message: "Invalid site" });
+        return;
+      }
+      property = await Property.findById(propertyId);
+      if (!property || !property.isActive) {
+        res.status(404).json({ success: false, message: "Property not found" });
+        return;
+      }
+      if (!isOwnedBy(property.owner, req.user)) {
+        res.status(403).json({ success: false, message: "Not authorized" });
+        return;
+      }
     }
 
     let clientId = req.body.clientId ? String(req.body.clientId) : "";
-    if (!clientId && property.client) clientId = String(property.client);
+    if (!clientId && property?.client) clientId = String(property.client);
     if (clientId) {
       const client = await Client.findById(clientId);
       if (!client || !client.isActive || !isOwnedBy(client.createdBy, req.user)) {
@@ -176,7 +180,7 @@ export const createProject = async (
       color,
       description: String(req.body.description || "").trim() || undefined,
       client: clientId || undefined,
-      property: property._id,
+      property: property?._id ?? null,
       status: "active",
     });
 

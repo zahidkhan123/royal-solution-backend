@@ -1,4 +1,5 @@
 import { Response, NextFunction } from "express";
+import mongoose from "mongoose";
 import Invoice, {
   calcInvoiceTotals,
   calcLineTotal,
@@ -76,6 +77,7 @@ async function normalizeItems(items: unknown[]): Promise<IInvoiceLineItem[]> {
     const price = Number(r.price) || 0;
     const discount = Number(r.discount) || 0;
     const tax = Number(r.tax) || 0;
+    const deposit = Math.max(0, Number(r.deposit) || 0);
     const images = parseImageList(r.images);
     const line: IInvoiceLineItem = {
       item: r.item as IInvoiceLineItem["item"],
@@ -87,6 +89,7 @@ async function normalizeItems(items: unknown[]): Promise<IInvoiceLineItem[]> {
       discount,
       tax,
       total: 0,
+      deposit,
       images: images.length ? images : undefined,
     };
     line.total = calcLineTotal(line);
@@ -531,16 +534,7 @@ export const updateInvoice = async (
       }
     }
 
-    const totals = calcInvoiceTotals({
-      items: invoice.items,
-      discountType: invoice.discountType,
-      discountValue: invoice.discountValue,
-      shippingCost: invoice.shippingCost,
-    });
-    invoice.subtotal = totals.subtotal;
-    invoice.discountAmount = totals.discountAmount;
-    invoice.taxAmount = totals.taxAmount;
-    invoice.grandTotal = totals.grandTotal;
+    applyInvoiceTotals(invoice);
 
     if (req.body.status) {
       const prev = invoice.status;
@@ -595,6 +589,162 @@ export const updateInvoice = async (
   }
 };
 
+/** Recalculate stored totals, including line deposits and recorded payments. */
+function applyInvoiceTotals(invoice: InstanceType<typeof Invoice>): void {
+  const totals = calcInvoiceTotals({
+    items: invoice.items,
+    discountType: invoice.discountType,
+    discountValue: invoice.discountValue,
+    shippingCost: invoice.shippingCost,
+    payments: invoice.payments,
+  });
+  invoice.subtotal = totals.subtotal;
+  invoice.discountAmount = totals.discountAmount;
+  invoice.taxAmount = totals.taxAmount;
+  invoice.grandTotal = totals.grandTotal;
+  invoice.depositPaid = totals.depositPaid;
+  invoice.amountPaid = totals.amountPaid;
+  invoice.amountDue = invoice.status === "paid" ? 0 : totals.amountDue;
+}
+
+/** Load an invoice the current staff user may change, or send the error. */
+async function loadEditableInvoice(
+  req: AuthRequest,
+  res: Response
+): Promise<InstanceType<typeof Invoice> | null> {
+  if (!isStaffRole(req.user!.role)) {
+    res.status(403).json({ success: false, message: "Admin only" });
+    return null;
+  }
+  const invoice = await Invoice.findById(req.params.id);
+  if (!invoice) {
+    res.status(404).json({ success: false, message: "Invoice not found" });
+    return null;
+  }
+  if (!isOwnedBy(invoice.createdBy, req.user)) {
+    res.status(403).json({ success: false, message: "Not authorized" });
+    return null;
+  }
+  return invoice;
+}
+
+async function sendPopulatedInvoice(
+  res: Response,
+  invoiceId: unknown,
+  message: string,
+  statusCode = 200
+): Promise<void> {
+  const populated = await Invoice.findById(invoiceId)
+    .populate("client")
+    .populate("bankAccount")
+    .lean();
+  res.status(statusCode).json({ success: true, message, data: { invoice: populated } });
+}
+
+/**
+ * Record a deposit or payment received. When payments cover the full amount,
+ * the invoice becomes paid.
+ */
+export const addInvoicePayment = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const invoice = await loadEditableInvoice(req, res);
+    if (!invoice) return;
+
+    if (invoice.status === "paid" || invoice.status === "cancelled") {
+      res.status(400).json({
+        success: false,
+        message: `This invoice is already ${invoice.status}`,
+      });
+      return;
+    }
+
+    const amount = Math.round((Number(req.body.amount) || 0) * 100) / 100;
+    if (amount <= 0) {
+      res.status(400).json({ success: false, message: "Enter an amount above 0" });
+      return;
+    }
+    const type = req.body.type === "deposit" ? "deposit" : "paid";
+    const date = req.body.date ? new Date(req.body.date) : new Date();
+    if (Number.isNaN(date.getTime())) {
+      res.status(400).json({ success: false, message: "Invalid payment date" });
+      return;
+    }
+
+    applyInvoiceTotals(invoice);
+    if (amount > invoice.amountDue + 0.001) {
+      res.status(400).json({
+        success: false,
+        message: `That's more than the ${invoice.amountDue.toFixed(2)} still due`,
+      });
+      return;
+    }
+
+    invoice.payments.push({
+      amount,
+      type,
+      date,
+      recordedBy: req.user!._id as unknown as mongoose.Types.ObjectId,
+    });
+    applyInvoiceTotals(invoice);
+
+    const fullyPaid = invoice.amountDue <= 0;
+    if (fullyPaid) {
+      invoice.status = "paid";
+      invoice.paidAt = new Date();
+      invoice.amountDue = 0;
+    }
+    await invoice.save();
+
+    await sendPopulatedInvoice(
+      res,
+      invoice._id,
+      fullyPaid ? "Invoice fully paid" : "Payment recorded",
+      201
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** Remove a payment recorded by mistake. Not allowed once the invoice is paid. */
+export const deleteInvoicePayment = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const invoice = await loadEditableInvoice(req, res);
+    if (!invoice) return;
+
+    if (invoice.status === "paid") {
+      res.status(400).json({
+        success: false,
+        message: "This invoice is paid. Payments can't be removed.",
+      });
+      return;
+    }
+
+    const before = invoice.payments.length;
+    invoice.payments = invoice.payments.filter(
+      (p) => String(p._id) !== String(req.params.paymentId)
+    );
+    if (invoice.payments.length === before) {
+      res.status(404).json({ success: false, message: "Payment not found" });
+      return;
+    }
+    applyInvoiceTotals(invoice);
+    await invoice.save();
+
+    await sendPopulatedInvoice(res, invoice._id, "Payment removed");
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const markInvoicePaid = async (
   req: AuthRequest,
   res: Response,
@@ -620,6 +770,7 @@ export const markInvoicePaid = async (
 
     invoice.status = "paid";
     invoice.paidAt = new Date();
+    invoice.amountDue = 0;
     await invoice.save();
 
     // Notify admin who created invoice

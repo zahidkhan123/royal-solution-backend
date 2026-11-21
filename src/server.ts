@@ -40,8 +40,18 @@ connectDB();
 const isDev = process.env.NODE_ENV !== "production";
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: isDev ? 500 : 100,
-  message: "Too many requests from this IP, please try again later.",
+  // The app makes many small calls per screen plus one per photo, so 100
+  // per 15 min was being hit in normal use.
+  max: isDev ? 2000 : 1000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Reply in JSON like every other error so clients can parse it.
+  handler: (_req: Request, res: Response) => {
+    res.status(429).json({
+      success: false,
+      message: "Too many requests. Please wait a minute and try again.",
+    });
+  },
 });
 
 app.use(helmet());

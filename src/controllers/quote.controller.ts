@@ -827,6 +827,8 @@ export const convertQuote = async (
       discountAmount: quote.discountAmount,
       taxAmount: quote.taxAmount,
       grandTotal: quote.grandTotal,
+      depositPaid: 0,
+      amountDue: quote.grandTotal,
       attachments: quote.attachments,
       notes: quote.notes,
       templateId: quote.templateId,

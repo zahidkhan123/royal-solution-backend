@@ -180,25 +180,23 @@ export const createJob = async (
       assignedTechnicianId,
     } = req.body;
 
-    if (!propertyId) {
-      res
-        .status(400)
-        .json({ success: false, message: "Property is required" });
-      return;
-    }
+    // Site (and so contact) is optional.
+    let jobPropertyId: mongoose.Types.ObjectId | undefined;
+    if (propertyId) {
+      const property = await Property.findById(propertyId);
+      if (!property || !property.isActive) {
+        res.status(404).json({ success: false, message: "Property not found" });
+        return;
+      }
 
-    const property = await Property.findById(propertyId);
-    if (!property || !property.isActive) {
-      res.status(404).json({ success: false, message: "Property not found" });
-      return;
-    }
-
-    if (!isOwnedBy(property.owner, req.user)) {
-      res.status(403).json({
-        success: false,
-        message: "You can only create jobs for your own properties",
-      });
-      return;
+      if (!isOwnedBy(property.owner, req.user)) {
+        res.status(403).json({
+          success: false,
+          message: "You can only create jobs for your own properties",
+        });
+        return;
+      }
+      jobPropertyId = property._id as mongoose.Types.ObjectId;
     }
 
     let linkedProject: mongoose.Types.ObjectId | undefined;
@@ -215,6 +213,8 @@ export const createJob = async (
       }
       if (!link.cleared && link.projectId) {
         linkedProject = link.projectId;
+        // A job without a site picks up its project's site, if it has one.
+        if (!jobPropertyId && link.propertyId) jobPropertyId = link.propertyId;
         if (sectionId) {
           const section = await resolveSectionId(link.projectId, sectionId);
           if (!section.ok) {
@@ -283,7 +283,7 @@ export const createJob = async (
 
     const job = await Job.create({
       owner: req.user!._id,
-      property: propertyId,
+      property: jobPropertyId ?? null,
       title: title.trim(),
       description,
       category: category || "other",
@@ -357,6 +357,8 @@ async function applyJobProject(
   }
 
   job.set("project", link.projectId);
+  // A job without a site picks up its project's site when filed.
+  if (!job.property && link.propertyId) job.set("property", link.propertyId);
 
   if (setsSection) {
     const section = await resolveSectionId(link.projectId, body.sectionId);

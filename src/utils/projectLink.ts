@@ -35,8 +35,10 @@ export async function resolveProjectAssignment(opts: {
   if (!project || !isOwnedBy(project.owner, opts.user)) {
     return { ok: false, status: 404, message: "Project not found" };
   }
+  // Only enforce a site match when both sides have a site.
   if (
     opts.propertyId &&
+    project.property &&
     String(opts.propertyId) !== String(project.property)
   ) {
     return {
@@ -49,7 +51,7 @@ export async function resolveProjectAssignment(opts: {
     ok: true,
     cleared: false,
     projectId: project._id as mongoose.Types.ObjectId,
-    propertyId: project.property as mongoose.Types.ObjectId,
+    propertyId: (project.property || undefined) as mongoose.Types.ObjectId | undefined,
     clientId: project.client as mongoose.Types.ObjectId | undefined,
   };
 }

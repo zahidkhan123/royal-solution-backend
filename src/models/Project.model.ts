@@ -25,7 +25,7 @@ export interface IProject extends Document {
   color: string;
   description?: string;
   client?: mongoose.Types.ObjectId;
-  property: mongoose.Types.ObjectId;
+  property?: mongoose.Types.ObjectId | null;
   status: ProjectStatus;
   sections: mongoose.Types.DocumentArray<IProjectSection>;
   members: mongoose.Types.DocumentArray<IProjectMember>;
@@ -84,7 +84,7 @@ const projectSchema = new Schema<IProject>(
     property: {
       type: Schema.Types.ObjectId,
       ref: "Property",
-      required: [true, "A project needs one site"],
+      default: null,
       index: true,
     },
     status: {

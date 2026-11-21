@@ -19,8 +19,19 @@ export interface IInvoiceLineItem {
   discount: number;
   tax: number;
   total: number;
+  /** Deposit the client already paid against this line. Reduces amount due, not the total. */
+  deposit?: number;
   /** Snapshot of catalog item images at invoice time (optional) */
   images?: string[];
+}
+
+/** Money received after the invoice was issued (deposit or part/final payment). */
+export interface IInvoicePayment {
+  _id?: mongoose.Types.ObjectId;
+  amount: number;
+  type: "deposit" | "paid";
+  date: Date;
+  recordedBy?: mongoose.Types.ObjectId;
 }
 
 export interface IInvoice extends Document {
@@ -50,6 +61,14 @@ export interface IInvoice extends Document {
   discountAmount: number;
   taxAmount: number;
   grandTotal: number;
+  /** Sum of line deposits already paid by the client. */
+  depositPaid: number;
+  /** Payments recorded on the invoice screen. */
+  payments: IInvoicePayment[];
+  /** Sum of payments. */
+  amountPaid: number;
+  /** grandTotal − depositPaid − amountPaid. */
+  amountDue: number;
   bankAccount?: mongoose.Types.ObjectId;
   depositRequest?: {
     type: "percentage" | "fixed";
@@ -111,10 +130,18 @@ const lineItemSchema = new Schema<IInvoiceLineItem>(
     discount: { type: Number, default: 0, min: 0 },
     tax: { type: Number, default: 0, min: 0 },
     total: { type: Number, default: 0, min: 0 },
+    deposit: { type: Number, default: 0, min: 0 },
     images: [{ type: String }],
   },
   { _id: false }
 );
+
+const paymentSchema = new Schema<IInvoicePayment>({
+  amount: { type: Number, required: true, min: 0.01 },
+  type: { type: String, enum: ["deposit", "paid"], default: "paid" },
+  date: { type: Date, default: Date.now },
+  recordedBy: { type: Schema.Types.ObjectId, ref: "User" },
+});
 
 const invoiceSchema = new Schema<IInvoice>(
   {
@@ -196,6 +223,11 @@ const invoiceSchema = new Schema<IInvoice>(
     discountAmount: { type: Number, default: 0 },
     taxAmount: { type: Number, default: 0 },
     grandTotal: { type: Number, default: 0 },
+    depositPaid: { type: Number, default: 0 },
+    payments: { type: [paymentSchema], default: [] },
+    amountPaid: { type: Number, default: 0 },
+    // No default: older invoices without it fall back to grandTotal in clients.
+    amountDue: { type: Number },
     bankAccount: {
       type: Schema.Types.ObjectId,
       ref: "BankAccount",
@@ -275,20 +307,27 @@ export function calcInvoiceTotals(inv: {
   discountType?: "percentage" | "fixed";
   discountValue?: number;
   shippingCost?: number;
+  payments?: { amount: number }[];
 }): {
   subtotal: number;
   discountAmount: number;
   taxAmount: number;
   grandTotal: number;
+  depositPaid: number;
+  amountPaid: number;
+  amountDue: number;
 } {
   let subtotal = 0;
+  let depositPaid = 0;
   let taxAmount = 0;
   for (const line of inv.items || []) {
     const base = line.quantity * line.price;
     const afterLineDiscount = Math.max(0, base - (line.discount || 0));
     subtotal += afterLineDiscount;
     taxAmount += afterLineDiscount * ((line.tax || 0) / 100);
+    depositPaid += Math.max(0, line.deposit || 0);
   }
+  depositPaid = Math.round(depositPaid * 100) / 100;
   subtotal = Math.round(subtotal * 100) / 100;
   taxAmount = Math.round(taxAmount * 100) / 100;
 
@@ -304,7 +343,26 @@ export function calcInvoiceTotals(inv: {
   const grandTotal =
     Math.round((subtotal - discountAmount + taxAmount + shipping) * 100) / 100;
 
-  return { subtotal, discountAmount, taxAmount, grandTotal };
+  const amountPaid =
+    Math.round(
+      (inv.payments || []).reduce((sum, p) => sum + Math.max(0, p.amount || 0), 0) * 100
+    ) / 100;
+
+  // Deposits and payments are money already received: they lower what's owed, not the total.
+  const amountDue = Math.max(
+    0,
+    Math.round((grandTotal - depositPaid - amountPaid) * 100) / 100
+  );
+
+  return {
+    subtotal,
+    discountAmount,
+    taxAmount,
+    grandTotal,
+    depositPaid,
+    amountPaid,
+    amountDue,
+  };
 }
 
 export default mongoose.model<IInvoice>("Invoice", invoiceSchema);

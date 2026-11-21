@@ -17,7 +17,8 @@ export interface IJobTimelineEntry {
 
 export interface IJob extends Document {
   owner: mongoose.Types.ObjectId;
-  property: mongoose.Types.ObjectId;
+  /** Site is optional — a job can be logged before a contact/site exists. */
+  property?: mongoose.Types.ObjectId | null;
   title: string;
   description?: string;
   category: string;
@@ -53,7 +54,7 @@ const jobSchema = new Schema<IJob>(
     property: {
       type: Schema.Types.ObjectId,
       ref: "Property",
-      required: true,
+      default: null,
       index: true,
     },
     title: {
