@@ -15,3 +15,13 @@ export const getOTPExpiry = (): Date => {
   expiryTime.setMinutes(expiryTime.getMinutes() + 5);
   return expiryTime;
 };
+
+/**
+ * After a code is verified, how long the user has to set a new password
+ * on the Reset Password screen (10 minutes from now).
+ */
+export const getResetWindowExpiry = (): Date => {
+  const expiryTime = new Date();
+  expiryTime.setMinutes(expiryTime.getMinutes() + 10);
+  return expiryTime;
+};

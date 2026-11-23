@@ -2,7 +2,11 @@ import { Response, NextFunction } from "express";
 import User, { AuthProvider, UserRole } from "../models/User.model.js";
 import OTP from "../models/OTP.model.js";
 import { generateToken } from "../utils/jwt.js";
-import { generateOTP, getOTPExpiry } from "../utils/otp.js";
+import {
+  generateOTP,
+  getOTPExpiry,
+  getResetWindowExpiry,
+} from "../utils/otp.js";
 import { sendOTPEmail } from "../utils/email.js";
 import { ValidatedRequest } from "../middleware/validateBody.middleware.js";
 import { AuthRequest } from "../middleware/auth.middleware.js";
@@ -130,7 +134,7 @@ export const register = async (
     // Single DB op: upsert OTP (faster than deleteMany + create)
     await OTP.findOneAndUpdate(
       { email: emailNorm },
-      { $set: { otp, expiresAt } },
+      { $set: { otp, expiresAt }, $unset: { verifiedAt: 1 } },
       { upsert: true, new: true }
     );
 
@@ -216,7 +220,7 @@ export const login = async (
       const expiresAt = getOTPExpiry();
       await OTP.findOneAndUpdate(
         { email: emailNorm },
-        { $set: { otp, expiresAt } },
+        { $set: { otp, expiresAt }, $unset: { verifiedAt: 1 } },
         { upsert: true, new: true }
       );
       // Await so failures surface in logs before the response finishes; still
@@ -289,7 +293,7 @@ export const forgotPassword = async (
     const expiresAt = getOTPExpiry();
     await OTP.findOneAndUpdate(
       { email: emailNorm },
-      { $set: { otp, expiresAt } },
+      { $set: { otp, expiresAt }, $unset: { verifiedAt: 1 } },
       { upsert: true, new: true }
     );
 
@@ -336,7 +340,7 @@ export const resendOTP = async (
     const expiresAt = getOTPExpiry();
     await OTP.findOneAndUpdate(
       { email: emailNorm },
-      { $set: { otp, expiresAt } },
+      { $set: { otp, expiresAt }, $unset: { verifiedAt: 1 } },
       { upsert: true, new: true }
     );
 
@@ -378,7 +382,11 @@ export const verifyOTP = async (
     const { email, otp } = req.validatedBody!;
     const emailNorm = email.toLowerCase().trim();
 
-    const otpRecord = await OTP.findOne({ email: emailNorm, otp });
+    const otpRecord = await OTP.findOne({
+      email: emailNorm,
+      otp,
+      verifiedAt: { $exists: false },
+    });
     if (!otpRecord) {
       res.status(400).json({
         success: false,
@@ -409,7 +417,13 @@ export const verifyOTP = async (
     user.verifiedAt = new Date();
     await user.save();
 
-    await OTP.deleteOne({ _id: otpRecord._id });
+    // Don't delete the code here: in the forgot-password flow the app calls
+    // verify-otp first and then reset-password with the SAME code. Mark it
+    // used instead (so it can't be verified again for another token) and give
+    // the user a fixed window to choose a new password. reset-password deletes it.
+    otpRecord.verifiedAt = new Date();
+    otpRecord.expiresAt = getResetWindowExpiry();
+    await otpRecord.save();
 
     const token = generateToken(String(user._id));
     res.status(200).json({

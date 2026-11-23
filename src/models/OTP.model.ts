@@ -7,6 +7,8 @@ export interface IOTP extends Document {
   email: string;
   otp: string;
   expiresAt: Date;
+  /** Set once verify-otp succeeds; the code then only works for reset-password. */
+  verifiedAt?: Date;
   createdAt: Date;
 }
 
@@ -33,6 +35,9 @@ const otpSchema = new Schema<IOTP>(
       type: Date,
       required: true,
       index: { expireAfterSeconds: 0 }, // Auto-delete expired documents
+    },
+    verifiedAt: {
+      type: Date,
     },
   },
   { timestamps: true }
