@@ -21,6 +21,7 @@ import {
   resolveProjectAssignment,
   resolveSectionId,
 } from "../utils/projectLink.js";
+import { canSeeAllRecords } from "../config/admin.js";
 
 export const listJobs = async (
   req: AuthRequest,
@@ -48,7 +49,10 @@ export const listJobs = async (
     const inbox =
       req.query.inbox === "1" || req.query.inbox === "true";
 
-    const filter: Record<string, unknown> = { owner: user._id };
+    // Portal admins see every user's jobs; everyone else only their own.
+    const filter: Record<string, unknown> = canSeeAllRecords(req)
+      ? {}
+      : { owner: user._id };
 
     if (status) filter.status = status;
     if (priority && JOB_PRIORITIES.includes(priority as JobPriority)) {
@@ -145,7 +149,7 @@ export const getJob = async (
       return;
     }
 
-    if (!isOwnedBy(job.owner, req.user)) {
+    if (!isOwnedBy(job.owner, req.user) && !canSeeAllRecords(req)) {
       res.status(403).json({ success: false, message: "Not authorized" });
       return;
     }

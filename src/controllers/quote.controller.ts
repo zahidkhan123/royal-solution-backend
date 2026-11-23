@@ -24,6 +24,7 @@ import {
 } from "../constants/maintenance.js";
 import { createNotification } from "../services/appNotification.service.js";
 import { resolveProjectAssignment } from "../utils/projectLink.js";
+import { canSeeAllRecords } from "../config/admin.js";
 
 const OPEN_QUOTE_STATUSES: QuoteStatus[] = ["draft", "sent"];
 const TERMINAL_QUOTE_STATUSES: QuoteStatus[] = [
@@ -228,15 +229,16 @@ export const listQuotes = async (
 
     await expireOverdueQuotes();
 
-    const filter: Record<string, unknown> = { createdBy: user._id };
+    // Portal admins see every user's estimates; everyone else only their own.
+    const seeAll = canSeeAllRecords(req);
+    const filter: Record<string, unknown> = seeAll ? {} : { createdBy: user._id };
     if (status) filter.status = status;
 
     if (q) {
       const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-      const matchingClients = await Client.find({
-        name: re,
-        createdBy: user._id,
-      })
+      const matchingClients = await Client.find(
+        seeAll ? { name: re } : { name: re, createdBy: user._id }
+      )
         .select("_id")
         .lean();
       const searchOr: Record<string, unknown>[] = [
@@ -265,6 +267,7 @@ export const listQuotes = async (
         .populate("job", "title priority status")
         .populate("property", "name address")
         .populate("invoice", "invoiceNumber status")
+        .populate("createdBy", "fullName email")
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
@@ -302,7 +305,8 @@ export const getQuote = async (
       return;
     }
 
-    const allowed = await userCanAccessQuote(req.user!, quote);
+    const allowed =
+      canSeeAllRecords(req) || (await userCanAccessQuote(req.user!, quote));
     if (!allowed) {
       res.status(403).json({ success: false, message: "Not authorized" });
       return;

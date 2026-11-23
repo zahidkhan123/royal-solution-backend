@@ -5,6 +5,7 @@ import { OAuth2Client } from "google-auth-library";
 import axios from "axios";
 import { ValidatedRequest } from "../middleware/validateBody.middleware.js";
 import crypto from "crypto";
+import { verifyAppleIdToken } from "../utils/appleAuth.js";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -385,44 +386,37 @@ export const appleLogin = async (
       return;
     }
 
-    // Decode Apple ID token (JWT)
-    // Note: In production, you should verify the token signature with Apple's public keys
-    // For now, we'll decode it and trust it (since it comes from Apple SDK)
-    const tokenParts = idToken.split(".");
-    if (tokenParts.length !== 3) {
-      res.status(400).json({
+    // Verify the token's signature, issuer, audience and expiry with Apple's
+    // public keys. Never trust the payload of an unverified token: anyone can
+    // forge one with any email and take over that account.
+    let identity;
+    try {
+      identity = await verifyAppleIdToken(idToken);
+    } catch (verifyError: any) {
+      console.error("Apple token verification failed:", verifyError?.message);
+      res.status(401).json({
         success: false,
-        message: "Invalid Apple ID token format",
+        message: "Invalid or expired Apple sign-in. Please try again.",
       });
       return;
     }
 
-    const payload = JSON.parse(
-      Buffer.from(tokenParts[1], "base64").toString("utf-8")
-    );
-
-    const { sub: socialId, email } = payload;
+    const { sub: socialId } = identity;
+    // Only trust an email Apple says is verified.
+    const email = identity.emailVerified ? identity.email : undefined;
     const fullName = appleUser?.fullName
       ? `${appleUser.fullName.givenName || ""} ${appleUser.fullName.familyName || ""}`.trim()
       : email?.split("@")[0] || "Apple User";
 
-    if (!email && !socialId) {
-      res.status(400).json({
-        success: false,
-        message: "Email or user ID is required from Apple account",
-      });
-      return;
-    }
-
-    // Check if user exists
-    let user;
-    if (email) {
-      user = await User.findOne({ email: email.toLowerCase() });
-    } else {
-      user = await User.findOne({
-        provider: AuthProvider.APPLE,
-        socialId,
-      });
+    // Match on the stable Apple user id first: Apple may omit or change the
+    // email (e.g. "Hide My Email"), which used to create duplicate empty
+    // accounts. Fall back to email to link an existing account on first use.
+    let user = await User.findOne({
+      provider: AuthProvider.APPLE,
+      socialId,
+    });
+    if (!user && email) {
+      user = await User.findOne({ email });
     }
 
     if (user) {

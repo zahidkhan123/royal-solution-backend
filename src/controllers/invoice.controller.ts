@@ -23,6 +23,7 @@ import {
   createNotification,
 } from "../services/appNotification.service.js";
 import { resolveProjectAssignment } from "../utils/projectLink.js";
+import { canSeeAllRecords } from "../config/admin.js";
 
 function resolveTemplateId(raw: unknown, fallback: string): InvoiceTemplateId {
   const id = typeof raw === "string" ? raw : fallback;
@@ -135,7 +136,10 @@ export const listInvoices = async (
     const projectId =
       typeof req.query.project === "string" ? req.query.project.trim() : "";
 
-    const filter: Record<string, unknown> = { createdBy: user._id };
+    // Portal admins see every user's invoices; everyone else only their own.
+    const filter: Record<string, unknown> = canSeeAllRecords(req)
+      ? {}
+      : { createdBy: user._id };
     if (status) filter.status = status;
     if (projectId) filter.project = projectId;
 
@@ -161,6 +165,7 @@ export const listInvoices = async (
         .populate("job", "title priority status")
         .populate("property", "name address")
         .populate("bankAccount")
+        .populate("createdBy", "fullName email")
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
@@ -254,7 +259,8 @@ export const getInvoice = async (
     }
 
     const user = req.user!;
-    const allowed = await userCanAccessInvoice(user, invoice);
+    const allowed =
+      canSeeAllRecords(req) || (await userCanAccessInvoice(user, invoice));
     if (!allowed) {
       res.status(403).json({ success: false, message: "Not authorized" });
       return;
