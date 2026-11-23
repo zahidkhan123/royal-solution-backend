@@ -208,6 +208,22 @@ userSchema.index({ country: 1, state: 1, city: 1 });
 userSchema.index({ provider: 1, socialId: 1 });
 userSchema.index({ blockedUsers: 1 });
 
+/**
+ * Drop role values that are no longer in the UserRole enum (e.g. legacy
+ * "Manager" / "Owner" left on older accounts). Without this, any save() on
+ * such a user — like a profile update — fails enum validation on `role.N`.
+ */
+const VALID_ROLES = new Set<string>(Object.values(UserRole));
+userSchema.pre("validate", function (next) {
+  const roles = this.role as unknown;
+  if (Array.isArray(roles) && roles.some((r) => !VALID_ROLES.has(String(r)))) {
+    this.role = [
+      ...new Set(roles.map(String).filter((r) => VALID_ROLES.has(r))),
+    ] as UserRole[];
+  }
+  next();
+});
+
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password") || this.provider !== AuthProvider.LOCAL) {
     return next();
